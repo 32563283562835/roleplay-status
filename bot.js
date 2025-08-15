@@ -4,7 +4,7 @@ let lastError = "No errors detected ✅";
 const botVersion = "1.0.0";
 
 const mainBotId = "1399496618121892000";
-const channelId = "YOUR_CHANNEL_ID";
+const channelId = "1400514116413689998";
 
 const client = new Client({
     intents: [
@@ -152,3 +152,4 @@ function formatUptime(ms) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
