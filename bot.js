@@ -1,5 +1,6 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const moment = require('moment-timezone');
 const fs = require('fs');
 
 // Vul hier het ID in van je main bot (niet de status bot)
@@ -75,8 +76,8 @@ async function updateStatus() {
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Main Bot", value: mainBotStatus, inline: false },
-            { name: "Last Seen Online", value: lastSeenOnline ? lastSeenOnline.toLocaleString() : "❓ Unknown", inline: true },
-            { name: "Last Seen Offline", value: lastSeenOffline ? lastSeenOffline.toLocaleString() : "❓ Unknown", inline: true },
+            { name: "Last Seen Online", value: lastSeenOnline ? formatLocalTime(lastSeenOnline) : "❓ Unknown", inline: true },
+            { name: "Last Seen Offline", value: lastSeenOffline ? formatLocalTime(lastSeenOffline) : "❓ Unknown", inline: true },
             {
                 name: "Offline Duration",
                 value: lastSeenOffline && lastSeenOnline
@@ -88,7 +89,7 @@ async function updateStatus() {
             { name: "Status Bot Uptime", value: uptime, inline: true },
             { name: "Last Error", value: "No errors detected ✅", inline: true }
         )
-        .setFooter({ text: `Last update (${new Date().toLocaleString()})` })
+        .setFooter({ text: `Last update (${formatLocalTime(new Date())})` })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
@@ -100,6 +101,10 @@ async function updateStatus() {
             messages.first().edit({ embeds: [embed] });
         }
     }
+}
+
+function formatLocalTime(date) {
+    return moment(date).tz('Europe/Amsterdam').format('DD-MM-YYYY HH:mm:ss');
 }
 
 function formatUptime(ms) {
@@ -117,5 +122,3 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
-
-
