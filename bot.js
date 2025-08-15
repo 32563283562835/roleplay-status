@@ -101,14 +101,14 @@ async function updateStatus() {
             },
             { name: "Status Bot", value: "🟢 Online", inline: false },
             { name: "Status Bot Uptime", value: uptime, inline: true },
-            { name: "Last Error", value: "No errors detected ✅", inline: true },
+            { name: "Last Error", value: "No errors detected ✅", inline: false },
             {
                 name: "Last Update",
                 value: formatDiscordTimestamp(new Date()),
                 inline: true
             }
         )
-        .setFooter({ text: "Bots powered by lewis091dc" })
+        .setFooter({ text: "Status bot powered by Discord.js" })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
