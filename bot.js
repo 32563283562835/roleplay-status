@@ -81,7 +81,7 @@ async function updateStatus() {
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
         .addFields(
-            { name: "Main Bot", value: mainBotStatus, inline: false },
+            { name: "Roleplay Bot", value: mainBotStatus, inline: false },
             {
                 name: "Last Seen Online",
                 value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
@@ -99,9 +99,6 @@ async function updateStatus() {
                     : "❓ Unknown",
                 inline: true
             },
-            { name: "Status Bot", value: "🟢 Online", inline: false },
-            { name: "Status Bot Uptime", value: uptime, inline: true },
-            { name: "Last Error", value: "No errors detected ✅", inline: true },
             {
                 name: "Last Update",
                 value: formatDiscordTimestamp(new Date()),
@@ -145,6 +142,7 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
