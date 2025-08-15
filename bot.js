@@ -101,11 +101,11 @@ async function updateStatus() {
             },
             { name: "Status Bot", value: "🟢 Online", inline: false },
             { name: "Status Bot Uptime", value: uptime, inline: true },
-            { name: "Last Error", value: "No errors detected ✅", inline: false },
+            { name: "Last Error", value: "No errors detected ✅", inline: true },
             {
                 name: "Last Update",
                 value: formatDiscordTimestamp(new Date()),
-                inline: true
+                inline: false
             }
         )
         .setFooter({ text: "Status bot powered by Discord.js" })
@@ -145,3 +145,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
