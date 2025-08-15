@@ -105,7 +105,7 @@ async function updateStatus() {
             {
                 name: "Last Update",
                 value: formatDiscordTimestamp(new Date()),
-                inline: true
+                inline: false
             }
         )
         .setFooter({ text: "Updating every 5 minutes" })
@@ -145,4 +145,5 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
