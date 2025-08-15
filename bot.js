@@ -108,7 +108,7 @@ async function updateStatus() {
                 inline: true
             }
         )
-        .setFooter({ text: "Status bot powered by Discord.js" })
+        .setFooter({ text: "Updating every 5 minutes" })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
@@ -145,3 +145,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
