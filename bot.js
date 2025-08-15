@@ -21,8 +21,15 @@ let lastSeenOffline = null;
 
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
-    updateStatus();
-    setInterval(updateStatus, 60 * 1000); // elke minuut verversen
+
+    // Synchroniseer met de klok: update bij elke nieuwe minuut
+    const now = new Date();
+    const msUntilNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+
+    setTimeout(() => {
+        updateStatus(); // eerste update precies op de minuut
+        setInterval(updateStatus, 60 * 1000); // daarna elke minuut
+    }, msUntilNextMinute);
 });
 
 async function updateStatus() {
