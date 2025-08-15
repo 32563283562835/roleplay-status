@@ -1,4 +1,12 @@
+const express = require("express");
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+
+// === Keep-alive server for Replit ===
+const app = express();
+app.get("/", (req, res) => res.send("Bot is running ✅"));
+app.listen(3000, () => console.log("🌐 Keep-alive webserver started on port 3000"));
+
+// === Status Bot ===
 const startTime = Date.now();
 let lastError = "No errors detected ✅";
 const botVersion = "1.0.0";
@@ -14,49 +22,21 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-    console.log(`Status bot is online as ${client.user.tag}`);
+    console.log(`✅ Status bot is online as ${client.user.tag}`);
     client.user.setStatus("online");
-    scheduleFirstUpdate();
+
+    updateStatus(); // direct
+    setInterval(updateStatus, 5 * 60 * 1000); // elke 5 min
 });
 
 async function updateStatus() {
     const now = new Date();
     const amsterdamTime = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Amsterdam" }));
-    const hour = amsterdamTime.getHours();
-
-    // Night mode: 22:00 - 07:00
-    if (hour >= 22 || hour < 7) {
-        console.log("🌙 Night mode active, sending notice and shutting down bot...");
-
-        try {
-            const channel = client.channels.cache.get(channelId);
-            if (channel) {
-                const nightEmbed = new EmbedBuilder()
-                    .setColor(0x5865F2)
-                    .setTitle("🌙 Night Mode Active")
-                    .setDescription(
-                        "The status bot is currently paused to save hosting hours.\n\n" +
-                        "**Night mode:** 22:00 – 07:00\n" +
-                        "Timezone: Europe/Amsterdam 🇳🇱\n\n" +
-                        "Status updates will resume at **07:00**."
-                    )
-                    .setFooter({ text: `Last check: ${amsterdamTime.toLocaleString("nl-NL", { timeZone: "Europe/Amsterdam" })}` })
-                    .setTimestamp();
-
-                await channel.send({ embeds: [nightEmbed] });
-            }
-        } catch (err) {
-            console.error("Error sending night mode embed:", err);
-        }
-
-        process.exit(0); // Stop process to save Railway hours
-        return;
-    }
 
     try {
         const channel = client.channels.cache.get(channelId);
         if (!channel) {
-            console.error("Status channel not found!");
+            console.error("❌ Status channel not found!");
             return;
         }
 
@@ -65,7 +45,7 @@ async function updateStatus() {
             try {
                 mainBotUser = await client.users.fetch(mainBotId);
             } catch (err) {
-                console.error("Could not fetch main bot:", err);
+                console.error("❌ Could not fetch main bot:", err);
             }
         }
 
@@ -108,29 +88,9 @@ async function updateStatus() {
         console.log("✅ Status message updated");
 
     } catch (err) {
-        console.error("Error while updating status:", err);
+        console.error("❌ Error while updating status:", err);
         lastError = err.message;
     }
-}
-
-function scheduleFirstUpdate() {
-    const now = new Date();
-    const amsterdamTime = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Amsterdam" }));
-
-    let firstRun = new Date(amsterdamTime);
-    firstRun.setHours(12, 0, 0, 0);
-
-    if (firstRun <= amsterdamTime) {
-        firstRun.setDate(firstRun.getDate() + 1);
-    }
-
-    const delay = firstRun - amsterdamTime;
-    console.log(`⏳ First update scheduled for ${firstRun.toLocaleString("nl-NL", { timeZone: "Europe/Amsterdam" })}`);
-
-    setTimeout(() => {
-        updateStatus();
-        setInterval(updateStatus, 5 * 60 * 1000);
-    }, delay);
 }
 
 process.on('unhandledRejection', err => {
@@ -152,4 +112,3 @@ function formatUptime(ms) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
-
