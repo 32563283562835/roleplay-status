@@ -108,7 +108,6 @@ async function updateStatus() {
                 inline: false
             }
         )
-        .setFooter({ text: "Status bot powered by Discord.js" })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
@@ -145,4 +144,5 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
