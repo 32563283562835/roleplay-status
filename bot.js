@@ -1,6 +1,5 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const moment = require('moment-timezone');
 const fs = require('fs');
 
 // Vul hier het ID in van je main bot (niet de status bot)
@@ -76,8 +75,16 @@ async function updateStatus() {
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Main Bot", value: mainBotStatus, inline: false },
-            { name: "Last Seen Online", value: lastSeenOnline ? formatLocalTime(lastSeenOnline) : "❓ Unknown", inline: true },
-            { name: "Last Seen Offline", value: lastSeenOffline ? formatLocalTime(lastSeenOffline) : "❓ Unknown", inline: true },
+            {
+                name: "Last Seen Online",
+                value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
+                inline: true
+            },
+            {
+                name: "Last Seen Offline",
+                value: lastSeenOffline ? formatDiscordTimestamp(lastSeenOffline) : "❓ Unknown",
+                inline: true
+            },
             {
                 name: "Offline Duration",
                 value: lastSeenOffline && lastSeenOnline
@@ -89,7 +96,7 @@ async function updateStatus() {
             { name: "Status Bot Uptime", value: uptime, inline: true },
             { name: "Last Error", value: "No errors detected ✅", inline: true }
         )
-        .setFooter({ text: `Last update (${formatLocalTime(new Date())})` })
+        .setFooter({ text: `Last update ${formatDiscordTimestamp(new Date())}` })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
@@ -103,10 +110,13 @@ async function updateStatus() {
     }
 }
 
-function formatLocalTime(date) {
-    return moment(date).tz('Europe/Amsterdam').format('DD-MM-YYYY HH:mm:ss');
+// Discord timestamp formatter (relative)
+function formatDiscordTimestamp(date) {
+    const unix = Math.floor(date.getTime() / 1000);
+    return `<t:${unix}:R>`;
 }
 
+// Format uptime as readable string
 function formatUptime(ms) {
     const sec = Math.floor(ms / 1000) % 60;
     const min = Math.floor(ms / (1000 * 60)) % 60;
@@ -115,6 +125,7 @@ function formatUptime(ms) {
     return `${days}d ${hrs}h ${min}m ${sec}s`;
 }
 
+// Duration between two dates
 function getDuration(from, to) {
     const ms = to - from;
     if (ms < 0) return "⏳ Calculating...";
