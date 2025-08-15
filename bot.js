@@ -1,107 +1,106 @@
-const express = require("express");
+require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const fs = require('fs');
 
-// === Keep-alive server for Replit ===
-const app = express();
-app.get("/", (req, res) => res.send("Bot is running ✅"));
-app.listen(3000, () => console.log("🌐 Keep-alive webserver started on port 3000"));
+// Vul hier het ID in van je main bot (niet de status bot)
+const mainBotId = '1399496618121892000';
 
-// === Status Bot ===
-const startTime = Date.now();
-let lastError = "No errors detected ✅";
-const botVersion = "1.0.0";
-
-const mainBotId = "1399496618121892000";
-const channelId = "1400514116413689998";
+// Zet hier je status channel ID
+const statusChannelId = '1400514116413689998';
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildPresences
+        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-client.once('ready', () => {
-    console.log(`✅ Status bot is online as ${client.user.tag}`);
-    client.user.setStatus("online");
+let lastSeenOnline = null;
+let lastSeenOffline = null;
 
-    updateStatus(); // direct
-    setInterval(updateStatus, 5 * 60 * 1000); // elke 5 min
+client.once('ready', async () => {
+    console.log(`✅ Status bot logged in as ${client.user.tag}`);
+    updateStatus();
+    setInterval(updateStatus, 60 * 1000); // elke minuut verversen
 });
 
 async function updateStatus() {
-    const now = new Date();
-    const amsterdamTime = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Amsterdam" }));
+    let mainBotStatus = "❓ Unknown";
+    let mainBotServerCount = "❓";
 
-    try {
-        const channel = client.channels.cache.get(channelId);
-        if (!channel) {
-            console.error("❌ Status channel not found!");
-            return;
-        }
+    for (const guild of client.guilds.cache.values()) {
+        await guild.members.fetch({ user: mainBotId, force: true }).catch(() => {});
+        const member = guild.members.cache.get(mainBotId);
 
-        let mainBotUser = client.users.cache.get(mainBotId);
-        if (!mainBotUser) {
-            try {
-                mainBotUser = await client.users.fetch(mainBotId);
-            } catch (err) {
-                console.error("❌ Could not fetch main bot:", err);
+        if (member) {
+            const presence = member.presence;
+            if (presence) {
+                switch (presence.status) {
+                    case "online":
+                        mainBotStatus = "🟢 Online";
+                        lastSeenOnline = new Date();
+                        break;
+                    case "idle":
+                        mainBotStatus = "🟡 Idle";
+                        lastSeenOnline = new Date();
+                        break;
+                    case "dnd":
+                        mainBotStatus = "🔴 Do Not Disturb";
+                        lastSeenOnline = new Date();
+                        break;
+                    default:
+                        mainBotStatus = "⚫ Offline";
+                        if (!lastSeenOffline || lastSeenOnline > lastSeenOffline) {
+                            lastSeenOffline = new Date();
+                        }
+                        break;
+                }
+            } else {
+                mainBotStatus = "⚫ Offline";
+                if (!lastSeenOffline || lastSeenOnline > lastSeenOffline) {
+                    lastSeenOffline = new Date();
+                }
             }
-        }
-
-        let mainBotStatus = "❓ Unknown";
-        let mainBotServerCount = "❓";
-
-        const presence = mainBotUser?.presence;
-        if (presence) {
-            mainBotStatus =
-                presence.status === "online" ? "🟢 Online" :
-                presence.status === "idle" ? "🟡 Idle" :
-                presence.status === "dnd" ? "🔴 Do Not Disturb" : "⚫ Offline";
 
             mainBotServerCount = client.guilds.cache.filter(g => g.members.cache.has(mainBotId)).size;
+            break;
         }
+    }
 
-        const embed = new EmbedBuilder()
-            .setColor(mainBotStatus.includes("🟢") ? 0x00FF00 : 0xFF0000)
-            .setTitle("📊 Bot Status Overview")
-            .addFields(
-                { name: "Main Bot", value: `${mainBotStatus}`, inline: true },
-                { name: "Main Bot Servers", value: `${mainBotServerCount}`, inline: true },
-                { name: "Status Bot", value: "🟢 Online", inline: true },
-                { name: "Status Bot Uptime", value: formatUptime(Date.now() - startTime), inline: true },
-                { name: "Ping", value: `${client.ws.ping}ms`, inline: true },
-                { name: "Bot Version", value: botVersion, inline: true },
-                { name: "Last Error", value: lastError, inline: false }
-            )
-            .setFooter({ text: `Last update (${amsterdamTime.toLocaleString("nl-NL", { timeZone: "Europe/Amsterdam" })})` })
-            .setTimestamp();
+    const ping = Math.round(client.ws.ping);
+    const uptime = formatUptime(client.uptime);
 
+    const embed = new EmbedBuilder()
+        .setTitle("📊 Bot Status Overview")
+        .addFields(
+            { name: "Main Bot", value: mainBotStatus, inline: false },
+            { name: "Last Seen Online", value: lastSeenOnline ? lastSeenOnline.toLocaleString() : "❓ Unknown", inline: true },
+            { name: "Last Seen Offline", value: lastSeenOffline ? lastSeenOffline.toLocaleString() : "❓ Unknown", inline: true },
+            {
+                name: "Offline Duration",
+                value: lastSeenOffline && lastSeenOnline
+                    ? getDuration(lastSeenOffline, lastSeenOnline)
+                    : "❓ Unknown",
+                inline: true
+            },
+            { name: "Status Bot", value: "🟢 Online", inline: false },
+            { name: "Status Bot Uptime", value: uptime, inline: true },
+            { name: "Last Error", value: "No errors detected ✅", inline: true }
+        )
+        .setFooter({ text: `Last update (${new Date().toLocaleString()})` })
+        .setColor("#0080FF");
+
+    const channel = client.channels.cache.get(statusChannelId);
+    if (channel) {
         const messages = await channel.messages.fetch({ limit: 1 });
         if (messages.size === 0) {
-            await channel.send({ embeds: [embed] });
+            channel.send({ embeds: [embed] });
         } else {
-            const message = messages.first();
-            await message.edit({ embeds: [embed] });
+            messages.first().edit({ embeds: [embed] });
         }
-
-        console.log("✅ Status message updated");
-
-    } catch (err) {
-        console.error("❌ Error while updating status:", err);
-        lastError = err.message;
     }
 }
-
-process.on('unhandledRejection', err => {
-    console.error("Unhandled error:", err);
-    lastError = err.message;
-});
-
-process.on('uncaughtException', err => {
-    console.error("Unexpected error:", err);
-    lastError = err.message;
-});
 
 function formatUptime(ms) {
     const sec = Math.floor(ms / 1000) % 60;
@@ -111,4 +110,10 @@ function formatUptime(ms) {
     return `${days}d ${hrs}h ${min}m ${sec}s`;
 }
 
-client.login(process.env.DISCORD_TOKEN);
+function getDuration(from, to) {
+    const ms = to - from;
+    if (ms < 0) return "⏳ Calculating...";
+    return formatUptime(ms);
+}
+
+client.login(process.env.BOT_TOKEN);
