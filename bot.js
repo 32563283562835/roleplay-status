@@ -140,11 +140,12 @@ function formatUptime(ms) {
 // Duration between two dates
 function getDuration(from, to) {
     const ms = to - from;
-    if (ms < 0) return "⏳ Now Offline...";
+    if (ms < 0) return ":x: Currently Offline...";
     return formatUptime(ms);
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
