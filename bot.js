@@ -99,12 +99,12 @@ async function updateStatus() {
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
         .addFields(
-            { name: "Roleplay Bot", value: mainBotStatus, inline: false },
+            { name: "Roleplay Bot", value: mainBotStatus, inline: true },
             { name: "Active Incidents", value: `${incidentCount}`, inline: true },
             {
                 name: "Last Seen Online",
                 value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
-                inline: true
+                inline: false
             },
             {
                 name: "Last Seen Offline",
@@ -161,4 +161,5 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
