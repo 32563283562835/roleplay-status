@@ -1,6 +1,19 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
+
+  client.user.setPresence({
+    status: 'idle', // opties: 'online', 'idle', 'dnd', 'invisible'
+    activities: [{
+      name: 'Updating status...',
+      type: ActivityType.Playing // andere opties: Listening, Watching, Competing, Streaming
+    }]
+  });
+});
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -142,6 +155,7 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
