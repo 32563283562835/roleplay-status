@@ -28,7 +28,7 @@ client.once('ready', async () => {
 
     setTimeout(() => {
         updateStatus(); // eerste update precies op de minuut
-        setInterval(updateStatus, 300 * 1000); // daarna elke minuut
+        setInterval(updateStatus, 60 * 1000); // daarna elke minuut
     }, msUntilNextMinute);
 });
 
@@ -105,7 +105,7 @@ async function updateStatus() {
                 inline: false
             }
         )
-        .setFooter({ text: "Updating every 5 minutes" })
+        .setFooter({ text: "Updating every minute..." })
         .setColor("#0080FF");
 
     const channel = client.channels.cache.get(statusChannelId);
@@ -142,6 +142,7 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
