@@ -1,14 +1,12 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { getIncidentCount, setupIncidentPanel } = require('./IncidentPanel');
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
 
 // Zet hier je status channel ID
 const statusChannelId = '1400514116413689998';
-
-// Laad IncidentPanel functie
-const { setupIncidentPanel } = require('./IncidentPanel');
 
 const client = new Client({
     intents: [
@@ -26,35 +24,30 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Zet een vaste presence zodra de bot klaar is
+    // Zet het incident-panel klaar
+    setupIncidentPanel(client);
+
+    // Update presence + status direct
+    updatePresence();
+    updateStatus();
+
+    // Update elke minuut opnieuw
+    setInterval(() => {
+        updatePresence();
+        updateStatus();
+    }, 60 * 1000);
+});
+
+// Luister naar incident-panel command (via IncidentPanel.js gedaan)
+
+// Presence updater
+function updatePresence() {
+    const count = getIncidentCount(); // Haalt aantal incidents op
     client.user.setPresence({
         status: 'online',
-        activities: [{ name: 'Monitoring Roleplay Bot', type: 3 }] // type 3 = WATCHING
+        activities: [{ name: `${count} Incidents Found`, type: 0 }] // type 0 = PLAYING
     });
-
-    // Synchroniseer met de klok: update bij elke nieuwe minuut
-    const now = new Date();
-    const msUntilNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
-
-    setTimeout(() => {
-        startCountdown();
-        updateStatus();
-        setInterval(() => {
-            startCountdown();
-            updateStatus();
-        }, 60 * 1000);
-    }, msUntilNextMinute);
-});
-
-// Luister naar het :incident-panel command
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return; // negeer bots
-
-    if (message.content === ':incident-panel') {
-        setupIncidentPanel(client);
-        message.reply("✅ Incident Panel Activated!");
-    }
-});
+}
 
 async function updateStatus() {
     let mainBotStatus = "❓ Unknown";
@@ -157,17 +150,6 @@ function getDuration(from, to) {
     const ms = to - from;
     if (ms < 0) return ":x: Currently Offline...";
     return formatUptime(ms);
-}
-
-// Countdown functie (alleen console log, geen Discord status meer)
-function startCountdown() {
-    let secondsLeft = 59;
-
-    const countdownInterval = setInterval(() => {
-        console.log(`⏳ Status update in: ${secondsLeft}s`);
-        secondsLeft--;
-        if (secondsLeft < 0) clearInterval(countdownInterval);
-    }, 1000);
 }
 
 client.login(process.env.BOT_TOKEN);
