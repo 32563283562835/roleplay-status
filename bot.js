@@ -1,6 +1,5 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -27,7 +26,7 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Zet hier pas de presence
+    // Zet presence zodra de bot klaar is
     client.user.setPresence({
         status: 'idle',
         activities: [{ name: 'Updating status...', type: 0 }]
@@ -38,8 +37,8 @@ client.once('ready', async () => {
     const msUntilNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
 
     setTimeout(() => {
-        startCountdown(); // start countdown per seconde
-        updateStatus();   // eerste update
+        startCountdown();
+        updateStatus();
         setInterval(() => {
             startCountdown();
             updateStatus();
@@ -47,24 +46,18 @@ client.once('ready', async () => {
     }, msUntilNextMinute);
 });
 
-client.user.setPresence({
-    status: 'idle',
-    activities: [{ name: 'Updating status...', type: 0 }]
-});
-
 // Luister naar het :incident-panel command
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return; // negeer bots
 
     if (message.content === ':incident-panel') {
-        setupIncidentPanel(client); // roep de functie aan
+        setupIncidentPanel(client);
         message.reply("✅ Incident Panel geactiveerd!");
     }
 });
 
 async function updateStatus() {
     let mainBotStatus = "❓ Unknown";
-    let mainBotServerCount = "❓";
 
     for (const guild of client.guilds.cache.values()) {
         await guild.members.fetch({ user: mainBotId, force: true }).catch(() => {});
@@ -99,14 +92,9 @@ async function updateStatus() {
                     lastSeenOffline = new Date();
                 }
             }
-
-            mainBotServerCount = client.guilds.cache.filter(g => g.members.cache.has(mainBotId)).size;
             break;
         }
     }
-
-    const ping = Math.round(client.ws.ping);
-    const uptime = formatUptime(client.uptime);
 
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
@@ -184,4 +172,3 @@ function startCountdown() {
 }
 
 client.login(process.env.BOT_TOKEN);
-
