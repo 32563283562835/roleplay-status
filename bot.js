@@ -36,22 +36,10 @@ client.once('ready', async () => {
     }, msUntilNextMinute);
 });
 
-function startCountdown() {
-    let secondsLeft = 59;
-
-    // Zet status naar idle direct
-    client.user.setStatus('idle');
-
-    const countdownInterval = setInterval(() => {
-        client.user.setActivity(`Updating status in: ${secondsLeft}s`, { type: 0 });
-
-        secondsLeft--;
-
-        if (secondsLeft < 0) {
-            clearInterval(countdownInterval);
-        }
-    }, 1000);
-}
+client.user.setPresence({
+    status: 'idle',
+    activities: [{ name: 'Updating status...', type: 0 }]
+});
 
 async function updateStatus() {
     let mainBotStatus = "❓ Unknown";
@@ -162,5 +150,10 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
-client.login(process.env.BOT_TOKEN);
+// Voeg bovenaan toe bij de imports
+const { setupIncidentPanel } = require('./IncidentPanel'); // pas pad aan indien nodig
 
+// Koppel het incident panel aan de client
+setupIncidentPanel(client);
+
+client.login(process.env.BOT_TOKEN);
