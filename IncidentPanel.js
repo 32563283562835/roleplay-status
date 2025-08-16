@@ -1,5 +1,11 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, EmbedBuilder } = require('discord.js');
 
+function setupIncidentPanel(client) {
+    // hier je code die de client gebruikt
+}
+
+module.exports = { setupIncidentPanel };
+
 // Temporary in-memory incident storage
 let incidents = [];
 
