@@ -8,11 +8,16 @@ const mainBotId = '1399496618121892000';
 // Zet hier je status channel ID
 const statusChannelId = '1400514116413689998';
 
+// Laad IncidentPanel functie
+const { setupIncidentPanel } = require('./IncidentPanel');
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
     ]
 });
 
@@ -39,6 +44,16 @@ client.once('ready', async () => {
 client.user.setPresence({
     status: 'idle',
     activities: [{ name: 'Updating status...', type: 0 }]
+});
+
+// Luister naar het :incident-panel command
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return; // negeer bots
+
+    if (message.content === ':incident-panel') {
+        setupIncidentPanel(client); // roep de functie aan
+        message.reply("✅ Incident Panel geactiveerd!");
+    }
 });
 
 async function updateStatus() {
@@ -150,10 +165,16 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
-// Voeg bovenaan toe bij de imports
-const { setupIncidentPanel } = require('./IncidentPanel'); // pas pad aan indien nodig
+// Countdown functie
+function startCountdown() {
+    let secondsLeft = 59;
+    client.user.setStatus('idle');
 
-// Koppel het incident panel aan de client
-setupIncidentPanel(client);
+    const countdownInterval = setInterval(() => {
+        client.user.setActivity(`Updating status in: ${secondsLeft}s`, { type: 0 });
+        secondsLeft--;
+        if (secondsLeft < 0) clearInterval(countdownInterval);
+    }, 1000);
+}
 
 client.login(process.env.BOT_TOKEN);
