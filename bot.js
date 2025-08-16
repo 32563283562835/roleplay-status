@@ -100,11 +100,11 @@ async function updateStatus() {
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Roleplay Bot", value: mainBotStatus, inline: true },
-            { name: "Active Incidents", value: `${incidentCount}`, inline: true },
+            { name: "Active Incidents", value: `${incidentCount}`, inline: false },
             {
                 name: "Last Seen Online",
                 value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
-                inline: false
+                inline: true
             },
             {
                 name: "Last Seen Offline",
@@ -161,5 +161,6 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
