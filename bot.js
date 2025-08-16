@@ -1,6 +1,6 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const { getIncidentCount, setupIncidentPanel } = require('./IncidentPanel');
+const { getIncidentCount, setupIncidentPanel, setUpdatePresenceCallback } = require('./IncidentPanel');
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -24,28 +24,33 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Zet het incident-panel klaar
+    // Incident panel (handlers registreren)
     setupIncidentPanel(client);
 
-    // Update presence + status direct
+    // Presence direct laten meeveranderen met incident-wijzigingen
+    setUpdatePresenceCallback(() => {
+        updatePresence();
+        updateStatus(); // ook embed meteen bijwerken
+    });
+
+    // Eerste set
     updatePresence();
     updateStatus();
 
-    // Update elke minuut opnieuw
+    // Embed elke minuut verversen als “keep-alive”
     setInterval(() => {
-        updatePresence();
         updateStatus();
     }, 60 * 1000);
 });
 
-// Luister naar incident-panel command (via IncidentPanel.js gedaan)
-
-// Presence updater
+// Presence updater (toon aantal incidents)
 function updatePresence() {
-    const count = getIncidentCount(); // Haalt aantal incidents op
+    const count = getIncidentCount();
+    const activity = `${count} Incidents Found`;
+
     client.user.setPresence({
-        status: 'online',
-        activities: [{ name: `${count} Incidents Found`, type: 0 }] // type 0 = PLAYING
+        status: count > 0 ? 'dnd' : 'online',
+        activities: [{ name: activity, type: 0 }] // 0 = PLAYING
     });
 }
 
@@ -74,14 +79,14 @@ async function updateStatus() {
                         break;
                     default:
                         mainBotStatus = "⚫ Offline";
-                        if (!lastSeenOffline || lastSeenOnline > lastSeenOffline) {
+                        if (!lastSeenOffline || (lastSeenOnline && lastSeenOnline > lastSeenOffline)) {
                             lastSeenOffline = new Date();
                         }
                         break;
                 }
             } else {
                 mainBotStatus = "⚫ Offline";
-                if (!lastSeenOffline || lastSeenOnline > lastSeenOffline) {
+                if (!lastSeenOffline || (lastSeenOnline && lastSeenOnline > lastSeenOffline)) {
                     lastSeenOffline = new Date();
                 }
             }
@@ -89,10 +94,13 @@ async function updateStatus() {
         }
     }
 
+    const incidentCount = getIncidentCount();
+
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Roleplay Bot", value: mainBotStatus, inline: false },
+            { name: "Active Incidents", value: `${incidentCount}`, inline: true },
             {
                 name: "Last Seen Online",
                 value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
@@ -117,15 +125,15 @@ async function updateStatus() {
             }
         )
         .setFooter({ text: "Updating every minute..." })
-        .setColor("#0080FF");
+        .setColor(incidentCount > 0 ? 0xED4245 : 0x0080FF);
 
     const channel = client.channels.cache.get(statusChannelId);
     if (channel) {
-        const messages = await channel.messages.fetch({ limit: 1 });
-        if (messages.size === 0) {
-            channel.send({ embeds: [embed] });
+        const messages = await channel.messages.fetch({ limit: 1 }).catch(() => null);
+        if (!messages || messages.size === 0) {
+            channel.send({ embeds: [embed] }).catch(() => {});
         } else {
-            messages.first().edit({ embeds: [embed] });
+            messages.first().edit({ embeds: [embed] }).catch(() => {});
         }
     }
 }
