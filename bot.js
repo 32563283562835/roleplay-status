@@ -26,10 +26,10 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Zet presence zodra de bot klaar is
+    // Zet een vaste presence zodra de bot klaar is
     client.user.setPresence({
-        status: 'idle',
-        activities: [{ name: 'Updating status...', type: 0 }]
+        status: 'online',
+        activities: [{ name: 'Monitoring Roleplay Bot', type: 3 }] // type 3 = WATCHING
     });
 
     // Synchroniseer met de klok: update bij elke nieuwe minuut
@@ -52,7 +52,7 @@ client.on('messageCreate', async (message) => {
 
     if (message.content === ':incident-panel') {
         setupIncidentPanel(client);
-        message.reply("✅ Incident Panel geactiveerd!");
+        message.reply("✅ Incident Panel Activated!");
     }
 });
 
@@ -159,13 +159,12 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
-// Countdown functie
+// Countdown functie (alleen console log, geen Discord status meer)
 function startCountdown() {
     let secondsLeft = 59;
-    client.user.setStatus('idle');
 
     const countdownInterval = setInterval(() => {
-        client.user.setActivity(`Updating status in: ${secondsLeft}s`, { type: 0 });
+        console.log(`⏳ Status update in: ${secondsLeft}s`);
         secondsLeft--;
         if (secondsLeft < 0) clearInterval(countdownInterval);
     }, 1000);
