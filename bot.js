@@ -1,5 +1,5 @@
 require('./keep_alive');
-const { setupIncidentPanel } = require('./incidentPanel');
+const { IncidentPanel } = require('./incidentPanel');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 
@@ -143,5 +143,6 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
