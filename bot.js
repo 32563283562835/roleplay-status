@@ -46,11 +46,11 @@ client.once('ready', async () => {
 // Presence updater (toon aantal incidents)
 function updatePresence() {
     const count = getIncidentCount();
-    const activity = `${count} Incidents Found`;
+    const activity = `${count} Incidents`;
 
     client.user.setPresence({
         status: count > 0 ? 'dnd' : 'online',
-        activities: [{ name: activity, type: 0 }] // 0 = PLAYING
+        activities: [{ name: activity, type: 3 }] // 0 = PLAYING
     });
 }
 
@@ -161,3 +161,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
