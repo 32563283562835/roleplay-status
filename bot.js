@@ -1,19 +1,6 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
-const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
-
-  client.user.setPresence({
-    status: 'idle', // opties: 'online', 'idle', 'dnd', 'invisible'
-    activities: [{
-      name: 'Updating status...',
-      type: ActivityType.Playing // andere opties: Listening, Watching, Competing, Streaming
-    }]
-  });
-});
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -40,10 +27,31 @@ client.once('ready', async () => {
     const msUntilNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
 
     setTimeout(() => {
-        updateStatus(); // eerste update precies op de minuut
-        setInterval(updateStatus, 60 * 1000); // daarna elke minuut
+        startCountdown(); // start countdown per seconde
+        updateStatus();   // eerste update
+        setInterval(() => {
+            startCountdown();
+            updateStatus();
+        }, 60 * 1000);
     }, msUntilNextMinute);
 });
+
+function startCountdown() {
+    let secondsLeft = 59;
+
+    const countdownInterval = setInterval(() => {
+        client.user.setPresence({
+            status: 'idle',
+            activities: [{ name: `Updating status in: ${secondsLeft}s`, type: 0 }]
+        });
+
+        secondsLeft--;
+
+        if (secondsLeft < 0) {
+            clearInterval(countdownInterval);
+        }
+    }, 1000);
+}
 
 async function updateStatus() {
     let mainBotStatus = "❓ Unknown";
@@ -155,9 +163,3 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
-
-
-
-
-
-
