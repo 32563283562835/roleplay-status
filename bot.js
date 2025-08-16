@@ -103,11 +103,6 @@ async function updateStatus() {
                 name: "Last Update",
                 value: formatDiscordTimestamp(new Date()),
                 inline: false
-            },
-            {
-                name: "Incidents",
-                value: "No incidents found...",
-                inline: false
             }
         )
         .setFooter({ text: "Updating every minute..." })
@@ -147,3 +142,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
