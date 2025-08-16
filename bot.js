@@ -27,6 +27,12 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
+    // Zet hier pas de presence
+    client.user.setPresence({
+        status: 'idle',
+        activities: [{ name: 'Updating status...', type: 0 }]
+    });
+
     // Synchroniseer met de klok: update bij elke nieuwe minuut
     const now = new Date();
     const msUntilNextMinute = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
@@ -178,3 +184,4 @@ function startCountdown() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
