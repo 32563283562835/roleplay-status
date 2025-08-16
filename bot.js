@@ -39,11 +39,11 @@ client.once('ready', async () => {
 function startCountdown() {
     let secondsLeft = 59;
 
+    // Zet status naar idle direct
+    client.user.setStatus('idle');
+
     const countdownInterval = setInterval(() => {
-        client.user.setPresence({
-            status: 'idle',
-            activities: [{ name: `Updating status in: ${secondsLeft}s`, type: 0 }]
-        });
+        client.user.setActivity(`Updating status in: ${secondsLeft}s`, { type: 0 });
 
         secondsLeft--;
 
@@ -163,3 +163,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
