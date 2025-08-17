@@ -9,18 +9,18 @@ const {
     EmbedBuilder
 } = require('discord.js');
 
-// Temporary in-memory incident storage
+// Temporary in-memory storage
 let incidents = [];
 
 const INCIDENT_CHANNEL_ID = '1406381100980371557';
 let incidentMessageId = null;
 
-// ====== Presence callback koppelstuk ======
+// ====== Presence callback hook ======
 let updatePresenceCallback = null;
 function setUpdatePresenceCallback(cb) { updatePresenceCallback = cb; }
 function notifyPresence() { if (typeof updatePresenceCallback === 'function') updatePresenceCallback(); }
-function getIncidentCount() { return incidents.length; }
-// =========================================
+function getIncidentCount() { return incidents.filter(i => !i.resolved).length; }
+// ====================================
 
 function setupIncidentPanel(client) {
     client.on('messageCreate', async (message) => {
@@ -33,7 +33,8 @@ function setupIncidentPanel(client) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('addIncident').setLabel('➕ Add Incident').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId('updateIncident').setLabel('✏️ Update Incident').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('removeIncident').setLabel('🗑️ Remove Incident').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId('removeIncident').setLabel('🗑️ Remove Incident').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('resolveIncident').setLabel('✅ Resolve Incident').setStyle(ButtonStyle.Secondary),
             );
 
             const embed = new EmbedBuilder()
@@ -43,22 +44,13 @@ function setupIncidentPanel(client) {
 
             await message.channel.send({ embeds: [embed], components: [row] });
 
-            // Send initial message to incident channel if not already sent
-            const channel = await client.channels.fetch(INCIDENT_CHANNEL_ID).catch(() => null);
-            if (channel && !incidentMessageId) {
-                const incidentEmbed = new EmbedBuilder()
-                    .setTitle('🚨 Incidents:')
-                    .setDescription('All active incidents will be listed here.')
-                    .setColor('Red');
-
-                const sentMsg = await channel.send({ embeds: [incidentEmbed] });
-                incidentMessageId = sentMsg.id;
-            }
+            // Always recreate the main incident board at the bottom
+            await createOrMoveIncidentBoard(client);
         }
     });
 
-    // Handle button interactions
     client.on('interactionCreate', async (interaction) => {
+        // --- BUTTONS ---
         if (interaction.isButton()) {
             if (interaction.customId === 'addIncident') {
                 const modal = new ModalBuilder().setCustomId('modalAddIncident').setTitle('Add Incident');
@@ -73,85 +65,121 @@ function setupIncidentPanel(client) {
                     new ActionRowBuilder().addComponents(timeInput)
                 );
 
-                await interaction.showModal(modal);
+                return interaction.showModal(modal);
             }
 
             if (interaction.customId === 'updateIncident') {
-                if (incidents.length === 0) return interaction.reply({ content: '⚠️ No incidents to update.', ephemeral: true });
+                if (incidents.length === 0) return interaction.reply({ content: '⚠️ No incidents to update.', flags: 64 });
 
                 const menu = new StringSelectMenuBuilder()
                     .setCustomId('selectIncidentUpdate')
                     .setPlaceholder('Select an incident to update')
                     .addOptions(incidents.map((i, idx) => ({
-                        label: i.title,
+                        label: i.title + (i.resolved ? ' (Resolved)' : ''),
                         description: i.description.substring(0, 50),
                         value: idx.toString()
                     })));
 
-
-                await interaction.reply({
+                return interaction.reply({
                     content: 'Select an incident to update:',
                     components: [new ActionRowBuilder().addComponents(menu)],
-                    ephemeral: true
+                    flags: 64
                 });
             }
 
             if (interaction.customId === 'removeIncident') {
-                if (incidents.length === 0) return interaction.reply({ content: '⚠️ No incidents to remove.', ephemeral: true });
+                if (incidents.length === 0) return interaction.reply({ content: '⚠️ No incidents to remove.', flags: 64 });
 
                 const menu = new StringSelectMenuBuilder()
                     .setCustomId('selectIncidentRemove')
                     .setPlaceholder('Select an incident to remove')
+                    .addOptions(incidents.map((i, idx) => ({
+                        label: i.title + (i.resolved ? ' (Resolved)' : ''),
+                        description: i.description.substring(0, 50),
+                        value: idx.toString()
+                    })));
+
+                return interaction.reply({
+                    content: 'Select an incident to remove:',
+                    components: [new ActionRowBuilder().addComponents(menu)],
+                    flags: 64
+                });
+            }
+
+            if (interaction.customId === 'resolveIncident') {
+                if (incidents.length === 0) return interaction.reply({ content: '⚠️ No incidents to resolve.', flags: 64 });
+
+                const menu = new StringSelectMenuBuilder()
+                    .setCustomId('selectIncidentResolve')
+                    .setPlaceholder('Select an incident to resolve')
                     .addOptions(incidents.map((i, idx) => ({
                         label: i.title,
                         description: i.description.substring(0, 50),
                         value: idx.toString()
                     })));
 
-                await interaction.reply({
-                    content: 'Select an incident to remove:',
+                return interaction.reply({
+                    content: 'Select an incident to resolve:',
                     components: [new ActionRowBuilder().addComponents(menu)],
-                    ephemeral: true
+                    flags: 64
                 });
             }
         }
 
-        // Handle modal submissions
+        // --- MODALS ---
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'modalAddIncident') {
                 const title = interaction.fields.getTextInputValue('incidentTitle');
                 const desc = interaction.fields.getTextInputValue('incidentDesc');
                 const time = interaction.fields.getTextInputValue('incidentTime');
 
-                incidents.push({ title, description: desc, time });
+                const incident = { title, description: desc, time, resolved: false };
+                incidents.push(incident);
 
-                await interaction.reply({ content: `✅ Incident **${title}** added.`, ephemeral: true });
+                await interaction.reply({ content: `✅ Incident **${title}** added.`, flags: 64 });
 
-                // Presence direct updaten
                 notifyPresence();
+                await createOrMoveIncidentBoard(client);
 
-                // Update the main incident message
+                // Also post separate incident message
                 const channel = await client.channels.fetch(INCIDENT_CHANNEL_ID).catch(() => null);
-                if (channel && incidentMessageId) {
-                    const msg = await channel.messages.fetch(incidentMessageId).catch(() => null);
-                    if (msg) {
-                        const embed = new EmbedBuilder()
-                            .setTitle('🚨 Incidents:')
-                            .setColor('Red')
-                            .setDescription(incidents.length > 0 ? '' : 'No active incidents.')
-                            .addFields(incidents.map(i => ({
-                                name: i.title,
-                                value: `${i.description}\n**Estimated Time:** ${i.time}`
-                            })));
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setTitle(`🚨 Incident: ${title}`)
+                        .setDescription(`${desc}\n**Estimated Time:** ${time}`)
+                        .setColor('Red')
+                        .setFooter({ text: 'Status: Active' })
+                        .setTimestamp();
 
-                        msg.edit({ embeds: [embed] });
-                    }
+                    await channel.send({ embeds: [embed] });
                 }
+            }
+
+            if (interaction.customId.startsWith('modalUpdateIncident_')) {
+                const index = parseInt(interaction.customId.split('_')[1]);
+                if (!incidents[index]) return;
+
+                incidents[index].title = interaction.fields.getTextInputValue('incidentTitle');
+                incidents[index].description = interaction.fields.getTextInputValue('incidentDesc');
+                incidents[index].time = interaction.fields.getTextInputValue('incidentTime');
+
+                await interaction.reply({ content: `✏️ Incident **${incidents[index].title}** updated.`, flags: 64 });
+                await createOrMoveIncidentBoard(client);
             }
         }
 
-        // Handle select menu for update/remove
+        // --- SELECT MENUS ---
         if (interaction.isStringSelectMenu()) {
+            if (interaction.customId === 'selectIncidentRemove') {
+                const index = parseInt(interaction.values[0]);
+                const removed = incidents.splice(index, 1);
+
+                await interaction.reply({ content: `🗑️ Incident **${removed[0].title}** removed.`, flags: 64 });
+
+                notifyPresence();
+                await createOrMoveIncidentBoard(client);
+            }
+
             if (interaction.customId === 'selectIncidentUpdate') {
                 const index = parseInt(interaction.values[0]);
                 const incident = incidents[index];
@@ -168,72 +196,48 @@ function setupIncidentPanel(client) {
                     new ActionRowBuilder().addComponents(timeInput)
                 );
 
-                await interaction.showModal(modal);
+                return interaction.showModal(modal);
             }
 
-            if (interaction.customId === 'selectIncidentRemove') {
+            if (interaction.customId === 'selectIncidentResolve') {
                 const index = parseInt(interaction.values[0]);
-                const removed = incidents.splice(index, 1);
+                if (!incidents[index]) return;
 
-                await interaction.reply({ content: `🗑️ Incident **${removed[0].title}** removed.`, ephemeral: true });
+                incidents[index].resolved = true;
 
-                // Presence direct updaten
+                await interaction.reply({ content: `✅ Incident **${incidents[index].title}** marked as resolved.`, flags: 64 });
+
                 notifyPresence();
-
-                // Update main incident message
-                const channel = await client.channels.fetch(INCIDENT_CHANNEL_ID).catch(() => null);
-                if (channel && incidentMessageId) {
-                    const msg = await channel.messages.fetch(incidentMessageId).catch(() => null);
-                    if (msg) {
-                        const embed = new EmbedBuilder()
-                            .setTitle('🚨 Incidents:')
-                            .setColor('Red')
-                            .setDescription(incidents.length > 0 ? '' : 'No active incidents.')
-                            .addFields(incidents.map(i => ({
-                                name: i.title,
-                                value: `${i.description}\n**Estimated Time:** ${i.time}`
-                            })));
-
-                        msg.edit({ embeds: [embed] });
-                    }
-                }
-            }
-        }
-
-        // Handle update modal submission
-        if (interaction.isModalSubmit() && interaction.customId.startsWith('modalUpdateIncident_')) {
-            const index = parseInt(interaction.customId.split('_')[1]);
-
-            incidents[index] = {
-                title: interaction.fields.getTextInputValue('incidentTitle'),
-                description: interaction.fields.getTextInputValue('incidentDesc'),
-                time: interaction.fields.getTextInputValue('incidentTime')
-            };
-
-            await interaction.reply({ content: `✏️ Incident **${incidents[index].title}** updated.`, ephemeral: true });
-
-            // (Optioneel) Presence updaten — aantal blijft gelijk, dus niet per se nodig
-            // notifyPresence();
-
-            // Update main incident message
-            const channel = await client.channels.fetch(INCIDENT_CHANNEL_ID).catch(() => null);
-            if (channel && incidentMessageId) {
-                const msg = await channel.messages.fetch(incidentMessageId).catch(() => null);
-                if (msg) {
-                    const embed = new EmbedBuilder()
-                        .setTitle('🚨 Incidents:')
-                        .setColor('Red')
-                        .setDescription(incidents.length > 0 ? '' : 'No active incidents.')
-                        .addFields(incidents.map(i => ({
-                            name: i.title,
-                            value: `${i.description}\n**Estimated Time:** ${i.time}`
-                        })));
-
-                    msg.edit({ embeds: [embed] });
-                }
+                await createOrMoveIncidentBoard(client);
             }
         }
     });
+}
+
+// Always create/move the board to the bottom
+async function createOrMoveIncidentBoard(client) {
+    const channel = await client.channels.fetch(INCIDENT_CHANNEL_ID).catch(() => null);
+    if (!channel) return;
+
+    // Delete old board
+    if (incidentMessageId) {
+        const oldMsg = await channel.messages.fetch(incidentMessageId).catch(() => null);
+        if (oldMsg) await oldMsg.delete().catch(() => {});
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle('🚨 Incidents:')
+        .setColor('Red')
+        .setDescription(incidents.length > 0 ? '' : 'No active incidents.')
+        .addFields(
+            incidents.map(i => ({
+                name: i.title,
+                value: `${i.description}\n**Estimated Time:** ${i.time}\n**Status:** ${i.resolved ? '✅ Resolved' : '🚨 Active'}`
+            }))
+        );
+
+    const sentMsg = await channel.send({ embeds: [embed] });
+    incidentMessageId = sentMsg.id;
 }
 
 module.exports = { setupIncidentPanel, getIncidentCount, setUpdatePresenceCallback };
