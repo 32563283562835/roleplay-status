@@ -7,7 +7,12 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  MessageFlags
 } = require("discord.js");
+
+const fs = require("fs");
+const path = require("path");
+const INCIDENT_FILE = path.join(__dirname, "incidents.json");
 
 const PREFIX = ".";
 let incidentCounter = 1;
@@ -15,12 +20,32 @@ let incidents = [];
 let panelMessage = null;
 let updatePresenceCallback = null;
 
+// Load incidents from file
+function loadIncidents() {
+  if (fs.existsSync(INCIDENT_FILE)) {
+    try {
+      const data = fs.readFileSync(INCIDENT_FILE);
+      incidents = JSON.parse(data);
+      incidentCounter = incidents.reduce((max, i) => Math.max(max, i.id), 0) + 1;
+    } catch (err) {
+      console.error("❌ Failed to load incidents:", err);
+      incidents = [];
+    }
+  }
+}
+
+// Save incidents to file
+function saveIncidents() {
+  fs.writeFileSync(INCIDENT_FILE, JSON.stringify(incidents, null, 2));
+}
+
 // Helper: update the incident panel embed
-async function updateIncidentPanel() {
-  if (!panelMessage) return;
+async function updateIncidentPanel(client) {
+  const incidentChannel = client.channels.cache.get("1406381100980371557");
+  if (!incidentChannel) return;
 
   const embed = new EmbedBuilder()
-    .setTitle("🚨 Incident Panel")
+    .setTitle("📋 Incident Overview")
     .setDescription(
       incidents.length === 0
         ? "There are no incidents at the moment."
@@ -39,11 +64,19 @@ async function updateIncidentPanel() {
     new ButtonBuilder().setCustomId("resolve_incident").setLabel("✅ Resolve Incident").setStyle(ButtonStyle.Success)
   );
 
-  await panelMessage.edit({ embeds: [embed], components: [row] });
+  // Verwijder oud panel als het bestaat
+  if (panelMessage) {
+    await panelMessage.delete().catch(() => {});
+  }
+
+  // Post nieuw panel en sla op
+  panelMessage = await incidentChannel.send({ embeds: [embed], components: [row] });
 }
 
 // Setup function to register handlers
 function setupIncidentPanel(client) {
+  loadIncidents();
+
   client.on("messageCreate", async (message) => {
     if (!message.content.startsWith(PREFIX) || message.author.bot) return;
 
@@ -51,18 +84,7 @@ function setupIncidentPanel(client) {
     const command = args.shift().toLowerCase();
 
     if (command === "incident-panel") {
-      const embed = new EmbedBuilder()
-        .setTitle("🚨 Incident Panel")
-        .setDescription("There are no incidents at the moment.")
-        .setColor(0xff0000)
-        .setTimestamp();
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("new_incident").setLabel("➕ New Incident").setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId("resolve_incident").setLabel("✅ Resolve Incident").setStyle(ButtonStyle.Success)
-      );
-
-      panelMessage = await message.channel.send({ embeds: [embed], components: [row] });
+      await updateIncidentPanel(client);
     }
   });
 
@@ -117,17 +139,25 @@ function setupIncidentPanel(client) {
           status: "active",
         };
         incidents.push(newIncident);
+        saveIncidents();
 
-        const embed = new EmbedBuilder()
-          .setTitle(`🚨 Incident #${newIncident.id}: ${title}`)
-          .setDescription(desc)
-          .setColor(0xff0000)
-          .setTimestamp();
+        const incidentChannel = interaction.client.channels.cache.get("1406381100980371557");
+        if (incidentChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle(`🚨 Incident #${newIncident.id}: ${title}`)
+            .setDescription(desc)
+            .setColor(0xff0000)
+            .setTimestamp();
 
-        await interaction.channel.send({ embeds: [embed] });
-        await interaction.reply({ content: `Incident #${newIncident.id} has been created!`, ephemeral: true });
+          await incidentChannel.send({ embeds: [embed] });
+        }
 
-        await updateIncidentPanel();
+        await interaction.reply({
+          content: `Incident #${newIncident.id} has been created!`,
+          flags: MessageFlags.Ephemeral
+        });
+
+        await updateIncidentPanel(interaction.client);
         if (updatePresenceCallback) updatePresenceCallback();
       }
 
@@ -136,13 +166,21 @@ function setupIncidentPanel(client) {
         const incident = incidents.find((i) => i.id === id);
 
         if (!incident) {
-          return interaction.reply({ content: `❌ No incident found with ID ${id}.`, ephemeral: true });
+          return interaction.reply({
+            content: `❌ No incident found with ID ${id}.`,
+            flags: MessageFlags.Ephemeral
+          });
         }
 
         incident.status = "resolved";
-        await interaction.reply({ content: `✅ Incident #${id} has been marked as resolved.`, ephemeral: true });
+        saveIncidents();
 
-        await updateIncidentPanel();
+        await interaction.reply({
+          content: `✅ Incident #${id} has been marked as resolved.`,
+          flags: MessageFlags.Ephemeral
+        });
+
+        await updateIncidentPanel(interaction.client);
         if (updatePresenceCallback) updatePresenceCallback();
       }
     }
