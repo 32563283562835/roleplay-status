@@ -1,9 +1,6 @@
 // IncidentPanel.js
 const {
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -59,18 +56,13 @@ async function updateIncidentPanel(client) {
     .setColor(0xff0000)
     .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("new_incident").setLabel("➕ New Incident").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("resolve_incident").setLabel("✅ Resolve Incident").setStyle(ButtonStyle.Success)
-  );
-
   // Verwijder oud panel als het bestaat
   if (panelMessage) {
     await panelMessage.delete().catch(() => {});
   }
 
   // Post nieuw panel en sla op
-  panelMessage = await incidentChannel.send({ embeds: [embed], components: [row] });
+  panelMessage = await incidentChannel.send({ embeds: [embed] });
 }
 
 // Setup function to register handlers
@@ -95,19 +87,33 @@ function setupIncidentPanel(client) {
 
         const titleInput = new TextInputBuilder()
           .setCustomId("incident_title")
-          .setLabel("Incident Title")
+          .setLabel("Title")
           .setStyle(TextInputStyle.Short)
           .setRequired(true);
 
-        const descInput = new TextInputBuilder()
-          .setCustomId("incident_desc")
-          .setLabel("Incident Description")
+        const reasonInput = new TextInputBuilder()
+          .setCustomId("incident_reason")
+          .setLabel("Reason")
           .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
+
+        const affectedInput = new TextInputBuilder()
+          .setCustomId("incident_affected")
+          .setLabel("Affected (what doesn't work)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const timeInput = new TextInputBuilder()
+          .setCustomId("incident_time")
+          .setLabel("Time (when it started or expected)")
+          .setStyle(TextInputStyle.Short)
           .setRequired(true);
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(titleInput),
-          new ActionRowBuilder().addComponents(descInput)
+          new ActionRowBuilder().addComponents(reasonInput),
+          new ActionRowBuilder().addComponents(affectedInput),
+          new ActionRowBuilder().addComponents(timeInput)
         );
 
         await interaction.showModal(modal);
@@ -130,12 +136,16 @@ function setupIncidentPanel(client) {
     if (interaction.isModalSubmit()) {
       if (interaction.customId === "modal_new_incident") {
         const title = interaction.fields.getTextInputValue("incident_title");
-        const desc = interaction.fields.getTextInputValue("incident_desc");
+        const reason = interaction.fields.getTextInputValue("incident_reason");
+        const affected = interaction.fields.getTextInputValue("incident_affected");
+        const time = interaction.fields.getTextInputValue("incident_time");
 
         const newIncident = {
           id: incidentCounter++,
           title,
-          description: desc,
+          reason,
+          affected,
+          time,
           status: "active",
         };
         incidents.push(newIncident);
@@ -145,7 +155,11 @@ function setupIncidentPanel(client) {
         if (incidentChannel) {
           const embed = new EmbedBuilder()
             .setTitle(`🚨 Incident #${newIncident.id}: ${title}`)
-            .setDescription(desc)
+            .addFields(
+              { name: "Reason", value: reason },
+              { name: "Affected", value: affected },
+              { name: "Time", value: time }
+            )
             .setColor(0xff0000)
             .setTimestamp();
 
