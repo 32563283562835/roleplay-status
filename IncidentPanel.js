@@ -1,29 +1,23 @@
 // incidentPanel.js
-// A modular, token-agnostic incident panel for Discord (discord.js v14)
+// A modular, token-agnostic Discord.js v14 module that wires an interactive incident panel.
 // Usage:
-//   const { registerIncidentPanel } = require('./incidentPanel');
-//   registerIncidentPanel(client, { allowedUserId: '1329813179865235467' });
+//   const { setupIncidentPanel } = require('./incidentPanel');
+//   setupIncidentPanel(client, {
+//     allowedUserId: '1329813179865235467',
+//     auditChannelId: '1407310001718038609', // private audit trail channel
+//     notificationChannelId: '1406381100980371557', // new-incident notifications
+//     overviewChannelId: '1406381100980371557', // where the rolling overview lives (can be different)
+//     dataDir: './data' // folder for JSON persistence
+//   });
+//
 // Requirements:
-//   - This file assumes you already created and logged-in a discord.js v14 Client elsewhere.
-//   - No token or login code is included here, by design.
-
-/*
-Features
-- .incident-panel command (message-based) only for a specific user id
-- Create / Edit / Resolve / Delete incidents
-- View & Filter (status, date range, priority, assignee) + search by keyword
-- Persistent JSON file storage
-- Audit Trail (per-incident change log) to a private channel (ID configurable)
-- Overview message: always kept at the bottom by re-posting after each change
-- Channel notification on new incident to a configured channel
-- Extensible Notifier hooks (Slack, Email) – stubbed for later integration
-- Clean, modular structure within a single file for portability
-*/
+//   - discord.js ^14
+//   - Node 18+
+//   - The bot must already be logged in elsewhere (this file does not handle tokens)
 
 const fs = require('fs');
 const path = require('path');
 const {
-  ChannelType,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -32,576 +26,569 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  ComponentType,
-  PermissionFlagsBits,
+  SlashCommandBuilder,
+  PermissionsBitField,
 } = require('discord.js');
 
-/** Utility: timestamp */
-const nowIso = () => new Date().toISOString();
-
 /**
- * Simple persistent key-value store on disk (JSON file).
+ * @typedef {Object} Incident
+ * @property {string} id
+ * @property {string} title
+ * @property {string} reason
+ * @property {string} status // open | investigating | monitoring | resolved | closed
+ * @property {string} priority // low | medium | high | critical
+ * @property {string} createdBy
+ * @property {string} assignedTo // userId or ''
+ * @property {number} createdAt
+ * @property {number} updatedAt
+ * @property {string[]} notes // arbitrary notes
+ * @property {Array<{at:number, by:string, action:string, diff?:any}>} audit
  */
-class JsonStore {
-  constructor(file = path.join(process.cwd(), 'incidents.json')) {
-    this.file = file;
-    if (!fs.existsSync(this.file)) {
-      fs.writeFileSync(
-        this.file,
-        JSON.stringify({ incidents: [], overviewByChannel: {} }, null, 2)
-      );
-    }
-    this._cache = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-  }
-  read() { return this._cache; }
-  write(next) {
-    this._cache = next;
-    fs.writeFileSync(this.file, JSON.stringify(next, null, 2));
-  }
-  update(mutator) {
-    const data = this.read();
-    mutator(data);
-    this.write(data);
+
+// ------------------------------
+// Configuration defaults
+// ------------------------------
+const DEFAULTS = {
+  allowedUserId: '1329813179865235467',
+  auditChannelId: '1407310001718038609',
+  notificationChannelId: '1406381100980371557',
+  overviewChannelId: '1406381100980371557',
+  dataDir: './data',
+};
+
+// ------------------------------
+// Utilities & Persistence
+// ------------------------------
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function loadJSON(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return fallback;
   }
 }
 
-/**
- * Notifier hooks – extend here to send Slack, Email, etc.
- */
-class Notifier {
-  constructor({ slackWebhookUrl = null, emailTransport = null } = {}) {
-    this.slackWebhookUrl = slackWebhookUrl;
-    this.emailTransport = emailTransport;
-  }
-  async onNewIncident(incident) {
-    // TODO: implement slack/email if provided
-    return;
-  }
-  async onUpdateIncident(incident, change) { return; }
+function saveJSON(file, obj) {
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2));
 }
 
-/**
- * Audit logger – sends embeds to a private channel + keeps a per-incident array of changes.
- */
-class AuditLogger {
-  constructor(client, store, auditChannelId) {
-    this.client = client;
-    this.store = store;
-    this.auditChannelId = auditChannelId;
-  }
-  _pushLocal(incidentId, change) {
-    this.store.update((data) => {
-      const inc = data.incidents.find((i) => i.id === incidentId);
-      if (!inc) return;
-      inc.audit = inc.audit || [];
-      inc.audit.push(change);
-    });
-  }
-  async log(incident, change) {
-    this._pushLocal(incident.id, change);
-    const channel = await this._fetchAuditChannel();
-    if (!channel) return;
-    const embed = new EmbedBuilder()
-      .setTitle(`Audit: ${incident.title} (#${incident.id})`)
-      .setDescription(change.message || 'Change')
-      .addFields(
-        { name: 'By', value: `<@${change.by}>`, inline: true },
-        { name: 'At', value: new Date(change.at).toLocaleString(), inline: true },
-      )
-      .setFooter({ text: `Status: ${incident.status} | Priority: ${incident.priority || 'n/a'}` })
-      .setTimestamp(new Date(change.at));
-    await channel.send({ embeds: [embed] });
-  }
-  async _fetchAuditChannel() {
-    if (!this.auditChannelId) return null;
-    try {
-      const ch = await this.client.channels.fetch(this.auditChannelId);
-      if (ch && ch.type === ChannelType.GuildText) return ch;
-    } catch {}
-    return null;
+function shortId() {
+  return Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+}
+
+function statusColor(status) {
+  switch ((status || '').toLowerCase()) {
+    case 'open': return 0x00b5ad; // teal
+    case 'investigating': return 0xf2711c; // orange
+    case 'monitoring': return 0x6435c9; // violet
+    case 'resolved': return 0x21ba45; // green
+    case 'closed': return 0x767676; // grey
+    default: return 0x2185d0; // blue
   }
 }
 
-/**
- * Overview manager – ensures there is always a fresh message at the bottom.
- * Strategy: delete the previous overview message (if exists) and send a new one.
- */
-class OverviewManager {
-  constructor(client, store, getActiveIncidents) {
-    this.client = client;
-    this.store = store;
-    this.getActiveIncidents = getActiveIncidents;
-  }
-  /** Register/remember which channel holds the overview. */
-  setOverviewChannel(channelId) {
-    this.store.update((data) => {
-      data.overviewByChannel[channelId] = data.overviewByChannel[channelId] || { messageId: null };
-    });
-  }
-  _getOverviewState(channelId) {
-    const data = this.store.read();
-    return data.overviewByChannel[channelId] || { messageId: null };
-  }
-  _setOverviewMessageId(channelId, messageId) {
-    this.store.update((data) => {
-      data.overviewByChannel[channelId] = data.overviewByChannel[channelId] || {};
-      data.overviewByChannel[channelId].messageId = messageId;
-    });
-  }
-  async refresh(channelId) {
-    const channel = await this._fetchTextChannel(channelId);
-    if (!channel) return;
-
-    // delete previous overview message if any
-    const state = this._getOverviewState(channelId);
-    if (state.messageId) {
-      try {
-        const m = await channel.messages.fetch(state.messageId);
-        if (m) await m.delete().catch(() => {});
-      } catch {}
-    }
-
-    const active = this.getActiveIncidents();
-    const embed = buildOverviewEmbed(active);
-
-    const components = [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('incident:refresh').setLabel('Refresh').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('incident:view').setLabel('View / Filter').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('incident:create').setLabel('Create').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('incident:search').setLabel('Search').setStyle(ButtonStyle.Secondary),
-      ),
-    ];
-
-    const sent = await channel.send({ embeds: [embed], components });
-    this._setOverviewMessageId(channelId, sent.id);
-  }
-  async _fetchTextChannel(id) {
-    try {
-      const ch = await this.client.channels.fetch(id);
-      if (ch && ch.type === ChannelType.GuildText) return ch;
-    } catch {}
-    return null;
+function priorityEmoji(priority) {
+  switch ((priority || '').toLowerCase()) {
+    case 'critical': return '🔴';
+    case 'high': return '🟠';
+    case 'medium': return '🟡';
+    case 'low': return '🟢';
+    default: return '⚪';
   }
 }
 
-/** Incident builder helpers */
-const STATUSES = ['open', 'investigating', 'monitoring', 'resolved'];
-const PRIORITIES = ['low', 'medium', 'high', 'critical'];
+function formatTs(ms) {
+  return `<t:${Math.floor(ms / 1000)}:f>`; // Discord dynamic timestamp
+}
 
-function buildOverviewEmbed(activeIncidents) {
-  const lines = activeIncidents.length
-    ? activeIncidents.map((i) => `• **#${i.id}** — ${i.title} (status: **${i.status}**, prio: **${i.priority || 'n/a'}**, owner: ${i.assignee ? `<@${i.assignee}>` : '—'})`)
-    : ['No active incidents.'];
+// ------------------------------
+// Incident Store (file-based)
+// ------------------------------
+class IncidentStore {
+  constructor(dir) {
+    this.dir = dir;
+    ensureDir(dir);
+    this.file = path.join(dir, 'incidents.json');
+    this.state = loadJSON(this.file, { incidents: [], overviewMessageId: null });
+  }
+  save() { saveJSON(this.file, this.state); }
+  /** @returns {Incident[]} */
+  list() { return this.state.incidents; }
+  get(id) { return this.state.incidents.find(i => i.id === id) || null; }
+  add(incident) { this.state.incidents.push(incident); this.save(); return incident; }
+  update(id, patch) {
+    const idx = this.state.incidents.findIndex(i => i.id === id);
+    if (idx === -1) return null;
+    this.state.incidents[idx] = { ...this.state.incidents[idx], ...patch, updatedAt: Date.now() };
+    this.save();
+    return this.state.incidents[idx];
+  }
+  remove(id) {
+    const before = this.state.incidents.length;
+    this.state.incidents = this.state.incidents.filter(i => i.id !== id);
+    this.save();
+    return this.state.incidents.length !== before;
+  }
+  setOverviewMessageId(id) { this.state.overviewMessageId = id; this.save(); }
+  getOverviewMessageId() { return this.state.overviewMessageId || null; }
+}
+
+// ------------------------------
+// Embeds & UI Builders
+// ------------------------------
+function incidentEmbed(incident) {
   return new EmbedBuilder()
-    .setTitle('Incident Overview (Active)')
-    .setDescription(lines.join('\n'))
-    .setTimestamp(new Date())
-    .setFooter({ text: 'Use the buttons below to manage incidents.' });
+    .setTitle(`${priorityEmoji(incident.priority)} ${incident.title}`)
+    .setColor(statusColor(incident.status))
+    .setDescription(incident.reason || '—')
+    .addFields(
+      { name: 'Status', value: `**${incident.status}**`, inline: true },
+      { name: 'Priority', value: incident.priority, inline: true },
+      { name: 'Assigned', value: incident.assignedTo ? `<@${incident.assignedTo}>` : '—', inline: true },
+      { name: 'Created', value: `${formatTs(incident.createdAt)} by <@${incident.createdBy}>`, inline: true },
+      { name: 'Updated', value: `${formatTs(incident.updatedAt)}`, inline: true },
+      { name: 'Notes', value: incident.notes.length ? incident.notes.map((n, idx) => `${idx + 1}. ${n}`).join('\n') : '—' }
+    )
+    .setFooter({ text: `Incident ID: ${incident.id}` });
 }
 
-function incidentToEmbed(i) {
-  const fields = [
-    { name: 'Reason', value: i.reason || '—', inline: false },
-    { name: 'Status', value: i.status, inline: true },
-    { name: 'Priority', value: i.priority || '—', inline: true },
-    { name: 'Assignee', value: i.assignee ? `<@${i.assignee}>` : '—', inline: true },
-    { name: 'Created At', value: new Date(i.createdAt).toLocaleString(), inline: true },
+function overviewEmbed(incidents) {
+  const active = incidents.filter(i => !['resolved', 'closed'].includes(i.status));
+  const desc = active.length
+    ? active
+      .sort((a,b)=>a.priority.localeCompare(b.priority))
+      .map(i => `${priorityEmoji(i.priority)} **${i.title}** — ${i.status} | ID: \`${i.id}\``)
+      .join('\n')
+    : 'No active incidents ✅';
+  return new EmbedBuilder()
+    .setTitle('Incident Overview')
+    .setDescription(desc)
+    .setColor(active.length ? 0xf2711c : 0x21ba45)
+    .setTimestamp(Date.now());
+}
+
+function panelEmbed() {
+  return new EmbedBuilder()
+    .setTitle('Incident Panel')
+    .setDescription('Create, edit, resolve, filter, search and manage incidents.')
+    .setColor(0x2185d0);
+}
+
+// Component custom IDs
+const CID = {
+  OPEN_PANEL: 'inc:openpanel',
+  CREATE: 'inc:create',
+  EDIT: 'inc:edit',
+  RESOLVE: 'inc:resolve',
+  DELETE: 'inc:delete',
+  VIEW_FILTER: 'inc:viewfilter',
+  REFRESH_OVERVIEW: 'inc:refreshov',
+  SELECT_INCIDENT: 'inc:select',
+  SELECT_FILTER: 'inc:filter',
+  SEARCH: 'inc:search',
+
+  // Modals
+  CREATE_MODAL: 'inc:modal:create',
+  EDIT_MODAL: 'inc:modal:edit',
+  RESOLVE_MODAL: 'inc:modal:resolve',
+  DELETE_MODAL: 'inc:modal:delete',
+  SEARCH_MODAL: 'inc:modal:search',
+};
+
+function panelRows() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(CID.CREATE).setLabel('Create').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(CID.EDIT).setLabel('Edit').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(CID.RESOLVE).setLabel('Resolve').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(CID.DELETE).setLabel('Delete').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(CID.SEARCH).setLabel('Search').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(CID.VIEW_FILTER).setLabel('View / Filter').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(CID.REFRESH_OVERVIEW).setLabel('Refresh Overview').setStyle(ButtonStyle.Secondary),
+    ),
   ];
-  if (i.updatedAt) fields.push({ name: 'Updated At', value: new Date(i.updatedAt).toLocaleString(), inline: true });
-  if (i.notes && i.notes.length) fields.push({ name: 'Notes', value: i.notes.map((n) => `• ${n}`).join('\n').slice(0, 1024), inline: false });
-  return new EmbedBuilder().setTitle(`#${i.id} — ${i.title}`).addFields(fields).setTimestamp(new Date());
 }
 
-/**
- * Main registration function. Call this with your logged-in client.
- */
-function registerIncidentPanel(
-  client,
-  {
-    allowedUserId = '1329813179865235467',
-    auditChannelId = '1407310001718038609',
-    newIncidentNotifyChannelId = '1406381100980371557',
-    storageFile = path.join(process.cwd(), 'incidents.json'),
-  } = {}
-) {
-  const store = new JsonStore(storageFile);
-  const notifier = new Notifier();
-  const audit = new AuditLogger(client, store, auditChannelId);
-  const overview = new OverviewManager(client, store, () => getActiveIncidents(store));
+function filterRow() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(CID.SELECT_FILTER)
+      .setPlaceholder('Filter by status / priority / assignee')
+      .addOptions(
+        { label: 'All', value: 'all' },
+        { label: 'Open', value: 'status:open' },
+        { label: 'Investigating', value: 'status:investigating' },
+        { label: 'Monitoring', value: 'status:monitoring' },
+        { label: 'Resolved', value: 'status:resolved' },
+        { label: 'Closed', value: 'status:closed' },
+        { label: 'Priority: Critical', value: 'priority:critical' },
+        { label: 'Priority: High', value: 'priority:high' },
+        { label: 'Priority: Medium', value: 'priority:medium' },
+        { label: 'Priority: Low', value: 'priority:low' },
+        { label: 'Assigned: Anyone', value: 'assigned:any' },
+        { label: 'Assigned: Me', value: 'assigned:me' },
+      )
+  );
+}
 
-  // ===== Helpers over store =====
-  function nextId() {
-    const data = store.read();
-    const max = data.incidents.reduce((m, x) => Math.max(m, x.id), 0);
-    return max + 1;
-  }
-  function getActiveIncidents(storeRef = store) {
-    const all = storeRef.read().incidents;
-    return all.filter((i) => i.status !== 'resolved');
-  }
-  function saveIncident(incident) {
-    store.update((data) => {
-      const idx = data.incidents.findIndex((i) => i.id === incident.id);
-      if (idx === -1) data.incidents.push(incident); else data.incidents[idx] = incident;
-    });
-  }
-  function removeIncident(id) {
-    store.update((data) => {
-      data.incidents = data.incidents.filter((i) => i.id !== id);
-    });
-  }
+function selectRow(incidents) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(CID.SELECT_INCIDENT)
+      .setPlaceholder('Select an incident')
+      .addOptions(
+        incidents.slice(0, 25).map(i => ({
+          label: `${i.title}`.slice(0, 100),
+          description: `${i.status} • ${i.priority}`.slice(0, 100),
+          value: i.id,
+        }))
+      )
+  );
+}
 
-  // ===== Security guard =====
-  function isAllowed(userId) { return userId === allowedUserId; }
+// ------------------------------
+// Audit Trail
+// ------------------------------
+async function sendAudit(client, opts, msg) {
+  const ch = await client.channels.fetch(opts.auditChannelId).catch(()=>null);
+  if (!ch || !ch.send) return;
+  const embed = new EmbedBuilder()
+    .setTitle('Incident Audit')
+    .setDescription(msg)
+    .setColor(0x95a5a6)
+    .setTimestamp(Date.now());
+  await ch.send({ embeds: [embed] }).catch(()=>{});
+}
 
-  // ===== Command: .incident-panel =====
-  client.on('messageCreate', async (msg) => {
+// ------------------------------
+// Overview Message Management
+// ------------------------------
+async function upsertOverviewMessage(client, store, opts) {
+  const channel = await client.channels.fetch(opts.overviewChannelId).catch(()=>null);
+  if (!channel || !channel.send) return;
+  const embed = overviewEmbed(store.list());
+  const existingId = store.getOverviewMessageId();
+  if (existingId) {
     try {
-      if (!msg.guild || msg.author.bot) return;
-      if (!msg.content.trim().startsWith('.incident-panel')) return;
-      if (!isAllowed(msg.author.id)) return; // silently ignore others
+      const msg = await channel.messages.fetch(existingId);
+      await msg.edit({ embeds: [embed] });
+      return;
+    } catch (_) {
+      // fallthrough to post a new one
+    }
+  }
+  // Always post a fresh overview so it sits at the bottom.
+  const message = await channel.send({ embeds: [embed] });
+  store.setOverviewMessageId(message.id);
+}
 
-      overview.setOverviewChannel(msg.channel.id);
+// ------------------------------
+// Modals
+// ------------------------------
+function buildCreateModal() {
+  const modal = new ModalBuilder().setCustomId(CID.CREATE_MODAL).setTitle('Create Incident');
+  const title = new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true);
+  const reason = new TextInputBuilder().setCustomId('reason').setLabel('Reason / Summary').setStyle(TextInputStyle.Paragraph).setRequired(true);
+  const priority = new TextInputBuilder().setCustomId('priority').setLabel('Priority (low/medium/high/critical)').setStyle(TextInputStyle.Short).setRequired(true);
+  const assigned = new TextInputBuilder().setCustomId('assigned').setLabel('Assign to (user ID, optional)').setStyle(TextInputStyle.Short).setRequired(false);
+  return modal.addComponents(
+    new ActionRowBuilder().addComponents(title),
+    new ActionRowBuilder().addComponents(reason),
+    new ActionRowBuilder().addComponents(priority),
+    new ActionRowBuilder().addComponents(assigned),
+  );
+}
 
-      const panel = buildMainPanel();
-      await msg.reply({ content: 'Incident Panel', components: panel });
-      await overview.refresh(msg.channel.id);
-    } catch (e) { console.error(e); }
+function buildEditModal(incident) {
+  const modal = new ModalBuilder().setCustomId(`${CID.EDIT_MODAL}:${incident.id}`).setTitle(`Edit ${incident.id}`);
+  const title = new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(false).setValue(incident.title);
+  const reason = new TextInputBuilder().setCustomId('reason').setLabel('Reason / Summary').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(incident.reason);
+  const status = new TextInputBuilder().setCustomId('status').setLabel('Status (open/investigating/monitoring/resolved/closed)').setStyle(TextInputStyle.Short).setRequired(false).setValue(incident.status);
+  const priority = new TextInputBuilder().setCustomId('priority').setLabel('Priority (low/medium/high/critical)').setStyle(TextInputStyle.Short).setRequired(false).setValue(incident.priority);
+  const assigned = new TextInputBuilder().setCustomId('assigned').setLabel('Assign to (user ID)').setStyle(TextInputStyle.Short).setRequired(false).setValue(incident.assignedTo || '');
+  return modal.addComponents(
+    new ActionRowBuilder().addComponents(title),
+    new ActionRowBuilder().addComponents(reason),
+    new ActionRowBuilder().addComponents(status),
+    new ActionRowBuilder().addComponents(priority),
+    new ActionRowBuilder().addComponents(assigned),
+  );
+}
+
+function buildResolveModal(incident) {
+  const modal = new ModalBuilder().setCustomId(`${CID.RESOLVE_MODAL}:${incident.id}`).setTitle(`Resolve ${incident.id}`);
+  const comment = new TextInputBuilder().setCustomId('comment').setLabel('Resolution comment (optional)').setStyle(TextInputStyle.Paragraph).setRequired(false);
+  return modal.addComponents(new ActionRowBuilder().addComponents(comment));
+}
+
+function buildDeleteModal(incident) {
+  const modal = new ModalBuilder().setCustomId(`${CID.DELETE_MODAL}:${incident.id}`).setTitle(`Delete ${incident.id}`);
+  const confirm = new TextInputBuilder().setCustomId('confirm').setLabel(`Type DELETE to confirm`).setStyle(TextInputStyle.Short).setRequired(true);
+  return modal.addComponents(new ActionRowBuilder().addComponents(confirm));
+}
+
+function buildSearchModal() {
+  const modal = new ModalBuilder().setCustomId(CID.SEARCH_MODAL).setTitle('Search Incidents');
+  const query = new TextInputBuilder().setCustomId('q').setLabel('Search query (title, reason, notes)').setStyle(TextInputStyle.Short).setRequired(true);
+  return modal.addComponents(new ActionRowBuilder().addComponents(query));
+}
+
+// ------------------------------
+// Notification helpers
+// ------------------------------
+async function notifyNewIncident(client, opts, incident) {
+  const ch = await client.channels.fetch(opts.notificationChannelId).catch(()=>null);
+  if (!ch || !ch.send) return;
+  await ch.send({ embeds: [incidentEmbed(incident)] }).catch(()=>{});
+}
+
+// ------------------------------
+// Entry: setup function
+// ------------------------------
+function setupIncidentPanel(client, options = {}) {
+  const opts = { ...DEFAULTS, ...options };
+  const store = new IncidentStore(opts.dataDir);
+
+  // Message command trigger: .incident-panel (only for allowedUserId)
+  client.on('messageCreate', async (msg) => {
+    if (!msg.guild || msg.author.bot) return;
+    if (!msg.content || !msg.content.trim().toLowerCase().startsWith('.incident-panel')) return;
+    if (msg.author.id !== String(opts.allowedUserId)) return; // ignore others silently
+
+    const embed = panelEmbed();
+    await msg.reply({ embeds: [embed], components: panelRows() });
   });
 
-  // ===== Component interactions =====
+  // Interaction handling
   client.on('interactionCreate', async (interaction) => {
     try {
       if (!interaction.isButton() && !interaction.isStringSelectMenu() && !interaction.isModalSubmit()) return;
-      if (!isAllowed(interaction.user.id)) return; // ignore non-authorized
 
-      const [ns, action, extra] = interaction.customId ? interaction.customId.split(':') : ['','', ''];
-      if (ns !== 'incident') return;
+      // Enforce access for panel actions
+      const userId = interaction.user?.id;
+      const allowed = String(userId) === String(opts.allowedUserId);
+      if (!allowed) return; // do nothing for unauthorized users
 
-      // Buttons and select menus
+      // Buttons
       if (interaction.isButton()) {
-        if (action === 'create') return showCreateModal(interaction);
-        if (action === 'view') return showFilterMenu(interaction, store);
-        if (action === 'refresh') {
-          await interaction.deferUpdate();
-          await overview.refresh(interaction.channel.id);
-          return;
+        const id = interaction.customId;
+        if (id === CID.CREATE) {
+          return void interaction.showModal(buildCreateModal());
         }
-        if (action === 'search') return showSearchModal(interaction);
-        if (action === 'edit') return showEditModal(interaction, parseInt(extra, 10));
-        if (action === 'resolve') return resolveIncidentFlow(interaction, parseInt(extra, 10));
-        if (action === 'delete') return deleteIncidentFlow(interaction, parseInt(extra, 10));
+        if (id === CID.EDIT) {
+          const incidents = store.list();
+          if (!incidents.length) return void interaction.reply({ content: 'No incidents to edit.', ephemeral: true });
+          return void interaction.reply({ content: 'Select an incident to edit:', components: [selectRow(incidents)], ephemeral: true });
+        }
+        if (id === CID.RESOLVE) {
+          const open = store.list().filter(i => !['resolved', 'closed'].includes(i.status));
+          if (!open.length) return void interaction.reply({ content: 'No open incidents to resolve.', ephemeral: true });
+          return void interaction.reply({ content: 'Select an incident to resolve:', components: [selectRow(open)], ephemeral: true });
+        }
+        if (id === CID.DELETE) {
+          const incidents = store.list();
+          if (!incidents.length) return void interaction.reply({ content: 'No incidents to delete.', ephemeral: true });
+          return void interaction.reply({ content: 'Select an incident to delete:', components: [selectRow(incidents)], ephemeral: true });
+        }
+        if (id === CID.VIEW_FILTER) {
+          const embed = overviewEmbed(store.list());
+          return void interaction.reply({ embeds: [embed], components: [filterRow()], ephemeral: true });
+        }
+        if (id === CID.REFRESH_OVERVIEW) {
+          await upsertOverviewMessage(interaction.client, store, opts);
+          return void interaction.reply({ content: 'Overview updated.', ephemeral: true });
+        }
+        if (id === CID.SEARCH) {
+          return void interaction.showModal(buildSearchModal());
+        }
       }
 
+      // Select menus
       if (interaction.isStringSelectMenu()) {
-        if (action === 'filter') return handleFilter(interaction, store);
+        const id = interaction.customId;
+        if (id === CID.SELECT_INCIDENT) {
+          const incidentId = interaction.values?.[0];
+          const incident = store.get(incidentId);
+          if (!incident) return void interaction.update({ content: 'Incident not found.', components: [] });
+
+          // Decide which modal: if this select was prompted from Edit/Resolve/Delete flows, infer by last button? We embed the next step as buttons.
+          const rows = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`inc:edit:${incident.id}`).setLabel('Edit Fields').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`inc:resolve:${incident.id}`).setLabel('Resolve').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`inc:delete:${incident.id}`).setLabel('Delete').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(`inc:view:${incident.id}`).setLabel('View').setStyle(ButtonStyle.Success),
+          );
+          return void interaction.update({ content: `Selected **${incident.title}** (${incident.id})`, embeds: [incidentEmbed(incident)], components: [rows] });
+        }
+        if (id === CID.SELECT_FILTER) {
+          const [type, value] = interaction.values[0].split(':');
+          const me = interaction.user.id;
+          let list = store.list();
+          if (type === 'status' && value) list = list.filter(i => i.status === value);
+          if (type === 'priority' && value) list = list.filter(i => i.priority === value);
+          if (type === 'assigned') {
+            if (value === 'me') list = list.filter(i => i.assignedTo === me);
+            else if (value === 'any') list = list.filter(i => !!i.assignedTo);
+          }
+          const embed = overviewEmbed(list);
+          return void interaction.update({ embeds: [embed] });
+        }
       }
 
+      // Dynamic button namespace actions (after selecting an incident)
+      if (interaction.isButton() && interaction.customId.startsWith('inc:edit:')) {
+        const id = interaction.customId.split(':')[2];
+        const inc = store.get(id);
+        if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+        return void interaction.showModal(buildEditModal(inc));
+      }
+      if (interaction.isButton() && interaction.customId.startsWith('inc:resolve:')) {
+        const id = interaction.customId.split(':')[2];
+        const inc = store.get(id);
+        if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+        return void interaction.showModal(buildResolveModal(inc));
+      }
+      if (interaction.isButton() && interaction.customId.startsWith('inc:delete:')) {
+        const id = interaction.customId.split(':')[2];
+        const inc = store.get(id);
+        if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+        return void interaction.showModal(buildDeleteModal(inc));
+      }
+      if (interaction.isButton() && interaction.customId.startsWith('inc:view:')) {
+        const id = interaction.customId.split(':')[2];
+        const inc = store.get(id);
+        if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+        return void interaction.reply({ embeds: [incidentEmbed(inc)], ephemeral: true });
+      }
+
+      // Modal submit handlers
       if (interaction.isModalSubmit()) {
-        if (action === 'createSubmit') return handleCreateSubmit(interaction);
-        if (action === 'editSubmit') return handleEditSubmit(interaction, parseInt(extra, 10));
-        if (action === 'searchSubmit') return handleSearchSubmit(interaction);
-        if (action === 'resolveSubmit') return handleResolveSubmit(interaction, parseInt(extra, 10));
+        const cid = interaction.customId;
+        // CREATE
+        if (cid === CID.CREATE_MODAL) {
+          const title = interaction.fields.getTextInputValue('title').trim();
+          const reason = interaction.fields.getTextInputValue('reason').trim();
+          const priority = interaction.fields.getTextInputValue('priority').toLowerCase().trim();
+          const assigned = (interaction.fields.getTextInputValue('assigned') || '').trim();
+          const now = Date.now();
+          const incident = /** @type {Incident} */ ({
+            id: shortId(),
+            title,
+            reason,
+            status: 'open',
+            priority: ['low','medium','high','critical'].includes(priority) ? priority : 'medium',
+            createdBy: interaction.user.id,
+            assignedTo: assigned || '',
+            createdAt: now,
+            updatedAt: now,
+            notes: [],
+            audit: [{ at: now, by: interaction.user.id, action: 'create', diff: { title, reason, priority, assigned } }],
+          });
+          store.add(incident);
+          await notifyNewIncident(interaction.client, opts, incident);
+          await sendAudit(interaction.client, opts, `Create ${incident.id} by <@${interaction.user.id}>`);
+          await upsertOverviewMessage(interaction.client, store, opts);
+          return void interaction.reply({ content: `Incident **${incident.title}** created (ID: ${incident.id}).`, embeds: [incidentEmbed(incident)], ephemeral: true });
+        }
+
+        // EDIT
+        if (cid.startsWith(`${CID.EDIT_MODAL}:`)) {
+          const id = cid.split(':')[2];
+          const inc = store.get(id);
+          if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+          const patch = {};
+          const title = interaction.fields.getTextInputValue('title'); if (title) patch.title = title;
+          const reason = interaction.fields.getTextInputValue('reason'); if (reason) patch.reason = reason;
+          const status = interaction.fields.getTextInputValue('status'); if (status) patch.status = status.toLowerCase();
+          const priority = interaction.fields.getTextInputValue('priority'); if (priority) patch.priority = priority.toLowerCase();
+          const assigned = interaction.fields.getTextInputValue('assigned'); if (assigned !== undefined) patch.assignedTo = assigned || '';
+
+          const next = store.update(id, patch);
+          if (!next) return void interaction.reply({ content: 'Failed to update incident.', ephemeral: true });
+          next.audit.push({ at: Date.now(), by: interaction.user.id, action: 'edit', diff: patch });
+          store.save();
+
+          await sendAudit(interaction.client, opts, `Edit ${id} by <@${interaction.user.id}>: ${Object.keys(patch).join(', ')}`);
+          await upsertOverviewMessage(interaction.client, store, opts);
+          return void interaction.reply({ content: `Incident **${next.title}** updated.`, embeds: [incidentEmbed(next)], ephemeral: true });
+        }
+
+        // RESOLVE
+        if (cid.startsWith(`${CID.RESOLVE_MODAL}:`)) {
+          const id = cid.split(':')[2];
+          const inc = store.get(id);
+          if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+          const comment = interaction.fields.getTextInputValue('comment');
+          const next = store.update(id, { status: 'resolved' });
+          if (!next) return void interaction.reply({ content: 'Failed to resolve incident.', ephemeral: true });
+          if (comment) next.notes.push(`Resolution: ${comment}`);
+          next.audit.push({ at: Date.now(), by: interaction.user.id, action: 'resolve', diff: { comment } });
+          store.save();
+
+          await sendAudit(interaction.client, opts, `Resolve ${id} by <@${interaction.user.id}>`);
+          await upsertOverviewMessage(interaction.client, store, opts);
+          return void interaction.reply({ content: `Incident **${next.title}** marked as resolved.`, embeds: [incidentEmbed(next)], ephemeral: true });
+        }
+
+        // DELETE
+        if (cid.startsWith(`${CID.DELETE_MODAL}:`)) {
+          const id = cid.split(':')[2];
+          const inc = store.get(id);
+          if (!inc) return void interaction.reply({ content: 'Incident not found.', ephemeral: true });
+          const confirm = interaction.fields.getTextInputValue('confirm');
+          if (confirm !== 'DELETE') return void interaction.reply({ content: 'Deletion cancelled (confirmation mismatch).', ephemeral: true });
+          const ok = store.remove(id);
+          if (!ok) return void interaction.reply({ content: 'Failed to delete.', ephemeral: true });
+          await sendAudit(interaction.client, opts, `Delete ${id} by <@${interaction.user.id}>`);
+          await upsertOverviewMessage(interaction.client, store, opts);
+          return void interaction.reply({ content: `Incident ${id} deleted.`, ephemeral: true });
+        }
+
+        // SEARCH
+        if (cid === CID.SEARCH_MODAL) {
+          const q = interaction.fields.getTextInputValue('q').toLowerCase();
+          const hits = store.list().filter(i =>
+            i.id.toLowerCase().includes(q) ||
+            (i.title || '').toLowerCase().includes(q) ||
+            (i.reason || '').toLowerCase().includes(q) ||
+            i.notes.some(n => n.toLowerCase().includes(q))
+          ).slice(0, 10);
+          if (!hits.length) return void interaction.reply({ content: 'No results.', ephemeral: true });
+          const embed = new EmbedBuilder()
+            .setTitle(`Search results for "${q}"`)
+            .setDescription(hits.map(i => `${priorityEmoji(i.priority)} **${i.title}** — ${i.status} | ID: \`${i.id}\``).join('\n'))
+            .setColor(0x3498db);
+          return void interaction.reply({ embeds: [embed], components: [selectRow(hits)], ephemeral: true });
+        }
       }
-    } catch (e) {
-      console.error(e);
+
+    } catch (err) {
+      console.error('[incident-panel] interaction error', err);
       if (interaction.isRepliable()) {
-        try { await interaction.reply({ content: 'An error occurred.', ephemeral: true }); } catch {}
+        await interaction.reply({ content: 'An error occurred while handling that action.', ephemeral: true }).catch(()=>{});
       }
     }
   });
 
-  // ===== UI Builders =====
-  function buildMainPanel() {
-    return [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('incident:create').setLabel('Create').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('incident:view').setLabel('View / Filter').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('incident:search').setLabel('Search').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('incident:refresh').setLabel('Refresh').setStyle(ButtonStyle.Secondary),
-      ),
-    ];
-  }
-
-  function showFilterMenu(interaction, storeRef) {
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId('incident:filter')
-      .setPlaceholder('Filter by status / priority')
-      .setMinValues(0)
-      .setMaxValues(5)
-      .addOptions(
-        { label: 'All', value: 'all' },
-        ...STATUSES.map((s) => ({ label: `Status: ${s}`, value: `s:${s}` })),
-        ...PRIORITIES.map((p) => ({ label: `Priority: ${p}`, value: `p:${p}` })),
-      );
-
-    const row = new ActionRowBuilder().addComponents(menu);
-    const all = storeRef.read().incidents;
-    const embed = new EmbedBuilder().setTitle('Incidents – All').setDescription(`${all.length} total`).setTimestamp(new Date());
-    return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-  }
-
-  function showCreateModal(interaction) {
-    const modal = new ModalBuilder().setCustomId('incident:createSubmit').setTitle('Create Incident');
-    const title = new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true);
-    const reason = new TextInputBuilder().setCustomId('reason').setLabel('Reason').setStyle(TextInputStyle.Paragraph).setRequired(true);
-    const priority = new TextInputBuilder().setCustomId('priority').setLabel('Priority (low/medium/high/critical)').setStyle(TextInputStyle.Short).setRequired(false);
-    const assignee = new TextInputBuilder().setCustomId('assignee').setLabel('Assignee (user ID)').setStyle(TextInputStyle.Short).setRequired(false);
-    const row1 = new ActionRowBuilder().addComponents(title);
-    const row2 = new ActionRowBuilder().addComponents(reason);
-    const row3 = new ActionRowBuilder().addComponents(priority);
-    const row4 = new ActionRowBuilder().addComponents(assignee);
-    modal.addComponents(row1, row2, row3, row4);
-    return interaction.showModal(modal);
-  }
-
-  function showEditModal(interaction, id) {
-    const data = store.read();
-    const inc = data.incidents.find((x) => x.id === id);
-    if (!inc) return interaction.reply({ content: 'Incident not found.', ephemeral: true });
-
-    const modal = new ModalBuilder().setCustomId(`incident:editSubmit:${id}`).setTitle(`Edit Incident #${id}`);
-    const title = new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setValue(inc.title).setRequired(true);
-    const reason = new TextInputBuilder().setCustomId('reason').setLabel('Reason').setStyle(TextInputStyle.Paragraph).setValue(inc.reason || '').setRequired(false);
-    const status = new TextInputBuilder().setCustomId('status').setLabel(`Status (${STATUSES.join('/')})`).setStyle(TextInputStyle.Short).setValue(inc.status).setRequired(true);
-    const priority = new TextInputBuilder().setCustomId('priority').setLabel(`Priority (${PRIORITIES.join('/')})`).setStyle(TextInputStyle.Short).setValue(inc.priority || '').setRequired(false);
-    const assignee = new TextInputBuilder().setCustomId('assignee').setLabel('Assignee (user ID)').setStyle(TextInputStyle.Short).setValue(inc.assignee || '').setRequired(false);
-    const note = new TextInputBuilder().setCustomId('note').setLabel('Add Note (optional)').setStyle(TextInputStyle.Paragraph).setRequired(false);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(title),
-      new ActionRowBuilder().addComponents(reason),
-      new ActionRowBuilder().addComponents(status),
-      new ActionRowBuilder().addComponents(priority),
-      new ActionRowBuilder().addComponents(assignee),
-      new ActionRowBuilder().addComponents(note),
-    );
-    return interaction.showModal(modal);
-  }
-
-  function showSearchModal(interaction) {
-    const modal = new ModalBuilder().setCustomId('incident:searchSubmit').setTitle('Search Incidents');
-    const q = new TextInputBuilder().setCustomId('q').setLabel('Keyword in title/reason/notes').setStyle(TextInputStyle.Short).setRequired(true);
-    modal.addComponents(new ActionRowBuilder().addComponents(q));
-    return interaction.showModal(modal);
-  }
-
-  async function resolveIncidentFlow(interaction, id) {
-    const modal = new ModalBuilder().setCustomId(`incident:resolveSubmit:${id}`).setTitle(`Resolve Incident #${id}`);
-    const comment = new TextInputBuilder().setCustomId('comment').setLabel('Resolution comment (optional)').setStyle(TextInputStyle.Paragraph).setRequired(false);
-    modal.addComponents(new ActionRowBuilder().addComponents(comment));
-    return interaction.showModal(modal);
-  }
-
-  async function deleteIncidentFlow(interaction, id) {
-    await interaction.reply({ content: `Confirm deletion of incident #${id}?`, components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`incident:confirmDelete:${id}`).setLabel('Delete').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('incident:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-      ),
-    ], ephemeral: true });
-  }
-
-  // Handle confirm/cancel buttons for deletion
-  client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isButton()) return;
-    if (!isAllowed(interaction.user.id)) return;
-    const [ns, action, id] = interaction.customId.split(':');
-    if (ns !== 'incident') return;
-    if (action === 'cancel') return interaction.update({ content: 'Cancelled.', components: [] });
-    if (action === 'confirmDelete') {
-      const intId = parseInt(id, 10);
-      const exist = store.read().incidents.find((x) => x.id === intId);
-      if (!exist) return interaction.update({ content: 'Incident not found.', components: [] });
-      removeIncident(intId);
-      await audit.log(exist, { at: nowIso(), by: interaction.user.id, message: 'Deleted incident.' });
-      await interaction.update({ content: `Incident #${intId} deleted.`, components: [] });
-      await overview.refresh(interaction.channel.id);
-    }
-  });
-
-  // ===== Handlers =====
-  async function handleCreateSubmit(interaction) {
-    const title = interaction.fields.getTextInputValue('title');
-    const reason = interaction.fields.getTextInputValue('reason');
-    const priorityRaw = (interaction.fields.getTextInputValue('priority') || '').trim().toLowerCase();
-    const assignee = (interaction.fields.getTextInputValue('assignee') || '').trim();
-    const priority = PRIORITIES.includes(priorityRaw) ? priorityRaw : undefined;
-
-    const incident = {
-      id: nextId(),
-      title,
-      reason,
-      status: 'open',
-      priority,
-      assignee: assignee || undefined,
-      notes: [],
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      audit: [],
-      createdBy: interaction.user.id,
-    };
-
-    saveIncident(incident);
-    await audit.log(incident, { at: nowIso(), by: interaction.user.id, message: 'Created incident.' });
-
-    // Notify channel with details
-    await notifyNewIncident(client, newIncidentNotifyChannelId, incident);
-    await notifier.onNewIncident(incident);
-
-    await interaction.reply({ embeds: [incidentToEmbed(incident)], components: [rowForIncidentActions(incident)], ephemeral: true });
-    await overview.refresh(interaction.channel.id);
-  }
-
-  function rowForIncidentActions(incident) {
-    return new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`incident:edit:${incident.id}`).setLabel('Edit').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`incident:resolve:${incident.id}`).setLabel('Resolve').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`incident:delete:${incident.id}`).setLabel('Delete').setStyle(ButtonStyle.Danger),
-    );
-  }
-
-  async function handleEditSubmit(interaction, id) {
-    const data = store.read();
-    const inc = data.incidents.find((x) => x.id === id);
-    if (!inc) return interaction.reply({ content: 'Incident not found.', ephemeral: true });
-
-    const prev = { ...inc };
-
-    inc.title = interaction.fields.getTextInputValue('title');
-    inc.reason = interaction.fields.getTextInputValue('reason') || inc.reason;
-    const statusRaw = (interaction.fields.getTextInputValue('status') || '').trim().toLowerCase();
-    inc.status = STATUSES.includes(statusRaw) ? statusRaw : inc.status;
-    const prioRaw = (interaction.fields.getTextInputValue('priority') || '').trim().toLowerCase();
-    inc.priority = PRIORITIES.includes(prioRaw) ? prioRaw : undefined;
-    const assignRaw = (interaction.fields.getTextInputValue('assignee') || '').trim();
-    inc.assignee = assignRaw || undefined;
-
-    const note = interaction.fields.getTextInputValue('note');
-    if (note) {
-      inc.notes = inc.notes || [];
-      inc.notes.push(`${new Date().toLocaleString()} – ${note}`);
-    }
-
-    inc.updatedAt = nowIso();
-    saveIncident(inc);
-
-    await audit.log(inc, { at: nowIso(), by: interaction.user.id, message: describeDiff(prev, inc) });
-    await notifier.onUpdateIncident(inc, { type: 'edit' });
-
-    await interaction.reply({ embeds: [incidentToEmbed(inc)], components: [rowForIncidentActions(inc)], ephemeral: true });
-    await overview.refresh(interaction.channel.id);
-  }
-
-  function describeDiff(prev, next) {
-    const diffs = [];
-    for (const key of ['title', 'reason', 'status', 'priority', 'assignee']) {
-      if (prev[key] !== next[key]) diffs.push(`${key}: \`${prev[key] || '—'}\` → \`${next[key] || '—'}\``);
-    }
-    return diffs.length ? `Edited: ${diffs.join(', ')}` : 'Edited (no field changes)';
-  }
-
-  async function handleSearchSubmit(interaction) {
-    const q = interaction.fields.getTextInputValue('q').toLowerCase();
-    const hits = store.read().incidents.filter((i) =>
-      (i.title && i.title.toLowerCase().includes(q)) ||
-      (i.reason && i.reason.toLowerCase().includes(q)) ||
-      (i.notes && i.notes.join(' ').toLowerCase().includes(q))
-    );
-
-    const desc = hits.length
-      ? hits.map((i) => `• **#${i.id}** ${i.title} [${i.status}]`).join('\n').slice(0, 4000)
-      : 'No matches.';
-
-    const embed = new EmbedBuilder().setTitle(`Search results for "${q}"`).setDescription(desc).setTimestamp(new Date());
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-  }
-
-  async function handleResolveSubmit(interaction, id) {
-    const data = store.read();
-    const inc = data.incidents.find((x) => x.id === id);
-    if (!inc) return interaction.reply({ content: 'Incident not found.', ephemeral: true });
-
-    const comment = interaction.fields.getTextInputValue('comment');
-    const prev = { ...inc };
-    inc.status = 'resolved';
-    if (comment) {
-      inc.notes = inc.notes || [];
-      inc.notes.push(`${new Date().toLocaleString()} – RESOLVED: ${comment}`);
-    }
-    inc.updatedAt = nowIso();
-    saveIncident(inc);
-
-    await audit.log(inc, { at: nowIso(), by: interaction.user.id, message: comment ? `Resolved with comment: ${comment}` : 'Resolved.' });
-    await notifier.onUpdateIncident(inc, { type: 'resolve' });
-
-    await interaction.reply({ content: `Incident #${id} marked resolved.`, ephemeral: true });
-    await overview.refresh(interaction.channel.id);
-  }
-
-  async function handleFilter(interaction, storeRef) {
-    const values = interaction.values || [];
-    const all = storeRef.read().incidents;
-
-    let filtered = [...all];
-    let title = 'Incidents – All';
-
-    const statusVals = values.filter((v) => v.startsWith('s:')).map((v) => v.slice(2));
-    const prioVals = values.filter((v) => v.startsWith('p:')).map((v) => v.slice(2));
-    const isAll = values.includes('all') || (statusVals.length === 0 && prioVals.length === 0);
-
-    if (!isAll) {
-      if (statusVals.length) {
-        filtered = filtered.filter((i) => statusVals.includes(i.status));
-        title += ` | Status: ${statusVals.join(',')}`;
-      }
-      if (prioVals.length) {
-        filtered = filtered.filter((i) => i.priority && prioVals.includes(i.priority));
-        title += ` | Priority: ${prioVals.join(',')}`;
-      }
-    }
-
-    const desc = filtered.length
-      ? filtered.map((i) => `• **#${i.id}** — ${i.title} [${i.status}${i.priority ? `/${i.priority}` : ''}]`).join('\n').slice(0, 4000)
-      : 'No incidents match the filter.';
-
-    const embed = new EmbedBuilder().setTitle(title).setDescription(desc).setTimestamp(new Date());
-    await interaction.update({ embeds: [embed] });
-  }
-
-  async function notifyNewIncident(client, channelId, incident) {
+  // Post an overview message at startup (optional)
+  client.once('ready', async () => {
     try {
-      const ch = await client.channels.fetch(channelId);
-      if (!ch || ch.type !== ChannelType.GuildText) return;
-      const embed = new EmbedBuilder()
-        .setTitle(`New Incident – #${incident.id}`)
-        .setDescription(incident.reason || '—')
-        .addFields(
-          { name: 'Title', value: incident.title, inline: true },
-          { name: 'Priority', value: incident.priority || '—', inline: true },
-          { name: 'Assignee', value: incident.assignee ? `<@${incident.assignee}>` : '—', inline: true },
-        )
-        .setTimestamp(new Date(incident.createdAt));
-      await ch.send({ embeds: [embed] });
-    } catch (e) { console.error('notifyNewIncident error', e); }
-  }
-
-  // ===== Convenience: list & quick actions reply when user mentions an id =====
-  client.on('messageCreate', async (msg) => {
-    if (!msg.guild || msg.author.bot) return;
-    if (!isAllowed(msg.author.id)) return;
-
-    const match = msg.content.match(/#(\d+)/);
-    if (!match) return;
-    const id = parseInt(match[1], 10);
-    const inc = store.read().incidents.find((x) => x.id === id);
-    if (!inc) return;
-
-    await msg.reply({ embeds: [incidentToEmbed(inc)], components: [rowForIncidentActions(inc)] });
+      await upsertOverviewMessage(client, store, opts);
+      console.log('[incident-panel] ready');
+    } catch (e) {
+      console.warn('[incident-panel] overview post failed', e.message);
+    }
   });
 
-  console.log('[incidentPanel] Registered.');
+  return {
+    store, // exposed for optional integrations
+    refreshOverview: () => upsertOverviewMessage(client, store, opts),
+  };
 }
 
-module.exports = { registerIncidentPanel };
+module.exports = { setupIncidentPanel };
