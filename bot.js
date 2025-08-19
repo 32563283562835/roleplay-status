@@ -18,12 +18,13 @@ const client = new Client({
 });
 
 // === Incident Panel koppelen ===
-const { registerIncidentPanel } = require('./IncidentPanel');
-registerIncidentPanel(client, {
-    allowedUserId: '1329813179865235467',
-    auditChannelId: '1407310001718038609',
-    newIncidentNotifyChannelId: '1406381100980371557',
-    // storageFile: './incidents.json' // optioneel
+const { setupIncidentPanel } = require('./IncidentPanel');
+setupIncidentPanel(client, {
+  allowedUserId: '1329813179865235467',
+  auditChannelId: '1407310001718038609',       // private audit trail
+  notificationChannelId: '1406381100980371557', // creation notifications
+  overviewChannelId: '1406381100980371557',     // rolling overview lives here
+  dataDir: './data'                             // JSON persistence
 });
 
 let lastSeenOnline = null;
@@ -152,5 +153,6 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
