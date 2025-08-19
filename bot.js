@@ -18,7 +18,7 @@ const client = new Client({
 });
 
 // === Incident Panel koppelen ===
-const { registerIncidentPanel } = require('./incidentPanel');
+const { registerIncidentPanel } = require('./IncidentPanel');
 registerIncidentPanel(client, {
     allowedUserId: '1329813179865235467',
     auditChannelId: '1407310001718038609',
