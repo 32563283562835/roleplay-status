@@ -7,14 +7,6 @@ const mainBotId = '1399496618121892000';
 // Zet hier je status channel ID
 const statusChannelId = '1400514116413689998';
 
-const { registerIncidentPanel } = require('./incidentPanel');
-registerIncidentPanel(client, {
-  allowedUserId: '1329813179865235467',
-  auditChannelId: '1407310001718038609',
-  newIncidentNotifyChannelId: '1406381100980371557',
-  // storageFile: '/absolute/or/relative/path/incidents.json' // optional
-});
-
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -23,6 +15,15 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
+});
+
+// === Incident Panel koppelen ===
+const { registerIncidentPanel } = require('./incidentPanel');
+registerIncidentPanel(client, {
+    allowedUserId: '1329813179865235467',
+    auditChannelId: '1407310001718038609',
+    newIncidentNotifyChannelId: '1406381100980371557',
+    // storageFile: './incidents.json' // optioneel
 });
 
 let lastSeenOnline = null;
@@ -47,7 +48,10 @@ async function updatePresence() {
         const incidentCount = getIncidentCount();
         client.user.setPresence({
             status: incidentCount > 0 ? 'dnd' : 'online',
-            activities: [{ name: incidentCount > 0 ? `${incidentCount} incidents` : "Monitoring", type: 3 }]
+            activities: [{
+                name: incidentCount > 0 ? `${incidentCount} incidents` : "Monitoring",
+                type: 3
+            }]
         });
     } catch (err) {
         console.error("❌ Failed to set presence:", err);
@@ -142,10 +146,9 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
-// Temporary dummy function until incident-panel.js is connected
+// Temporary dummy until incident-panel storage is linked
 function getIncidentCount() {
-    return 0; // TODO: link this with your incident-panel storage
+    return 0;
 }
 
 client.login(process.env.BOT_TOKEN);
-
