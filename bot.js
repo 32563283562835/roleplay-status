@@ -30,12 +30,7 @@ let lastSeenOnline = null;
 let lastSeenOffline = null;
 
 client.once('ready', async () => {
-    console.log(`✅ Status bot logged in as ${client.user.tag}`registerIncidentPanel(client, {
-    allowedUserId: '1329813179865235467', // jouw user id
-    auditChannelId: '1407310001718038609', // audit channel
-    newIncidentNotifyChannelId: '1406381100980371557', // notificatie channel
-    storageFile: './incidents.json', // locatie van opslag
-        );
+    console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
     // Eerste set
     await updatePresence();
@@ -157,4 +152,5 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
