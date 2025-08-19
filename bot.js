@@ -1,6 +1,5 @@
 require('./keep_alive');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const { getIncidentCount, setupIncidentPanel, setUpdatePresenceCallback } = require('./IncidentPanel');
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -24,15 +23,6 @@ let lastSeenOffline = null;
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Incident panel (handlers registreren)
-    setupIncidentPanel(client);
-
-    // Presence direct laten meeveranderen met incident-wijzigingen
-    setUpdatePresenceCallback(() => {
-        updatePresence();
-        updateStatus(); // ook embed meteen bijwerken
-    });
-
     // Eerste set
     updatePresence();
     updateStatus();
@@ -42,11 +32,6 @@ client.once('ready', async () => {
         updateStatus();
     }, 60 * 1000);
 });
-
-// Presence updater (toon aantal incidents)
-function updatePresence() {
-    const count = getIncidentCount();
-    const activity = `${count} Incidents`;
 
     client.user.setPresence({
         status: count > 0 ? 'dnd' : 'online',
@@ -165,6 +150,7 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
