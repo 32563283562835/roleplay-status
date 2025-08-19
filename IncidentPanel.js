@@ -134,6 +134,8 @@ class IncidentStore {
   }
   setOverviewMessageId(id) { this.state.overviewMessageId = id; this.save(); }
   getOverviewMessageId() { return this.state.overviewMessageId || null; }
+  setPanelMessageId(id) { this.state.panelMessageId = id; this.save(); }
+  getPanelMessageId() { return this.state.panelMessageId || null; }
 }
 
 // ------------------------------
@@ -167,6 +169,7 @@ function overviewEmbed(incidents) {
     .setTitle('Incident Overview')
     .setDescription(desc)
     .setColor(active.length ? 0xf2711c : 0x21ba45)
+    .setFooter({ text: MARK.OVERVIEW })
     .setTimestamp(Date.now());
 }
 
@@ -174,7 +177,8 @@ function panelEmbed() {
   return new EmbedBuilder()
     .setTitle('Incident Panel')
     .setDescription('Create, edit, resolve, filter, search and manage incidents.')
-    .setColor(0x2185d0);
+    .setColor(0x2185d0)
+    .setFooter({ text: MARK.PANEL });
 }
 
 // Component custom IDs
@@ -196,6 +200,12 @@ const CID = {
   RESOLVE_MODAL: 'inc:modal:resolve',
   DELETE_MODAL: 'inc:modal:delete',
   SEARCH_MODAL: 'inc:modal:search',
+};
+
+// Embed footers used to identify and clean up legacy messages
+const MARK = {
+  PANEL: 'INCIDENT_PANEL_V1',
+  OVERVIEW: 'INCIDENT_OVERVIEW_V1',
 };
 
 function panelRows() {
@@ -277,14 +287,15 @@ async function upsertOverviewMessage(client, store, opts) {
     try {
       const msg = await channel.messages.fetch(existingId);
       await msg.edit({ embeds: [embed] });
+      await pruneLegacyOverviewMessages(client, store, opts);
       return;
     } catch (_) {
-      // fallthrough to post a new one
+      // post new if old one cannot be fetched
     }
   }
-  // Always post a fresh overview so it sits at the bottom.
   const message = await channel.send({ embeds: [embed] });
   store.setOverviewMessageId(message.id);
+  await pruneLegacyOverviewMessages(client, store, opts);
 }
 
 // ------------------------------
@@ -339,6 +350,37 @@ function buildSearchModal() {
 }
 
 // ------------------------------
+// Legacy cleanup helpers
+// ------------------------------
+async function pruneLegacyOverviewMessages(client, store, opts) {
+  const ch = await client.channels.fetch(opts.overviewChannelId).catch(()=>null);
+  if (!ch || !ch.messages) return;
+  const keepId = store.getOverviewMessageId();
+  const coll = await ch.messages.fetch({ limit: 50 }).catch(()=>null);
+  if (!coll) return;
+  for (const m of coll.values()) {
+    if (m.author?.id !== client.user?.id) continue;
+    const marked = m.embeds?.some(e => ((e.footer?.text || '') === MARK.OVERVIEW) || (e.title === 'Incident Overview'));
+    if (marked && (!keepId || m.id !== keepId)) {
+      await m.delete().catch(()=>{});
+    }
+  }
+}
+
+async function pruneLegacyPanelsInChannel(client, channel, keepId) {
+  if (!channel?.messages) return;
+  const coll = await channel.messages.fetch({ limit: 50 }).catch(()=>null);
+  if (!coll) return;
+  for (const m of coll.values()) {
+    if (m.author?.id !== client.user?.id) continue;
+    const marked = m.embeds?.some(e => ((e.footer?.text || '') === MARK.PANEL) || (e.title === 'Incident Panel'));
+    if (marked && m.id !== keepId) {
+      await m.delete().catch(()=>{});
+    }
+  }
+}
+
+// ------------------------------
 // Notification helpers
 // ------------------------------
 async function notifyNewIncident(client, opts, incident) {
@@ -361,7 +403,17 @@ function setupIncidentPanel(client, options = {}) {
     if (msg.author.id !== String(opts.allowedUserId)) return; // ignore others silently
 
     const embed = panelEmbed();
-    await msg.reply({ embeds: [embed], components: panelRows() });
+    // Remove previous panel if we have it stored
+    const prevPanelId = store.getPanelMessageId();
+    if (prevPanelId) {
+      const prev = await msg.channel.messages.fetch(prevPanelId).catch(()=>null);
+      if (prev) await prev.delete().catch(()=>{});
+    }
+
+    const sent = await msg.reply({ embeds: [embed], components: panelRows() });
+    store.setPanelMessageId(sent.id);
+    // Clean up any other legacy panels in this channel (based on embed footer marker)
+    await pruneLegacyPanelsInChannel(client, msg.channel, sent.id);
   });
 
   // Interaction handling
