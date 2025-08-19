@@ -7,6 +7,14 @@ const mainBotId = '1399496618121892000';
 // Zet hier je status channel ID
 const statusChannelId = '1400514116413689998';
 
+const { registerIncidentPanel } = require('./incidentPanel');
+registerIncidentPanel(client, {
+  allowedUserId: '1329813179865235467',
+  auditChannelId: '1407310001718038609',
+  newIncidentNotifyChannelId: '1406381100980371557',
+  // storageFile: '/absolute/or/relative/path/incidents.json' // optional
+});
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -140,3 +148,4 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
