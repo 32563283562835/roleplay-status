@@ -24,19 +24,26 @@ client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
     // Eerste set
-    updatePresence();
-    updateStatus();
+    await updatePresence();
+    await updateStatus();
 
-    // Embed elke minuut verversen als “keep-alive”
-    setInterval(() => {
-        updateStatus();
+    // Embed elke minuut verversen
+    setInterval(async () => {
+        await updatePresence();
+        await updateStatus();
     }, 60 * 1000);
 });
 
-    client.user.setPresence({
-        status: count > 0 ? 'dnd' : 'online',
-        activities: [{ name: activity, type: 3 }] // 0 = PLAYING
-    });
+async function updatePresence() {
+    try {
+        const incidentCount = getIncidentCount();
+        client.user.setPresence({
+            status: incidentCount > 0 ? 'dnd' : 'online',
+            activities: [{ name: incidentCount > 0 ? `${incidentCount} incidents` : "Monitoring", type: 3 }]
+        });
+    } catch (err) {
+        console.error("❌ Failed to set presence:", err);
+    }
 }
 
 async function updateStatus() {
@@ -85,33 +92,11 @@ async function updateStatus() {
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Roleplay Bot", value: mainBotStatus, inline: true },
-            { 
-                name: "Active Incidents", 
-                value: `${incidentCount}`, 
-                inline: false 
-            },
-            {
-                name: "Last Seen Online",
-                value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown",
-                inline: true
-            },
-            {
-                name: "Last Seen Offline",
-                value: lastSeenOffline ? formatDiscordTimestamp(lastSeenOffline) : "❓ Unknown",
-                inline: true
-            },
-            {
-                name: "Offline Duration",
-                value: lastSeenOffline && lastSeenOnline
-                    ? getDuration(lastSeenOffline, lastSeenOnline)
-                    : "❓ Unknown",
-                inline: true
-            },
-            {
-                name: "Last Update",
-                value: formatDiscordTimestamp(new Date()),
-                inline: false
-            }
+            { name: "Active Incidents", value: `${incidentCount}`, inline: false },
+            { name: "Last Seen Online", value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown", inline: true },
+            { name: "Last Seen Offline", value: lastSeenOffline ? formatDiscordTimestamp(lastSeenOffline) : "❓ Unknown", inline: true },
+            { name: "Offline Duration", value: lastSeenOffline && lastSeenOnline ? getDuration(lastSeenOffline, lastSeenOnline) : "❓ Unknown", inline: true },
+            { name: "Last Update", value: formatDiscordTimestamp(new Date()), inline: false }
         )
         .setFooter({ text: "Updating every minute..." })
         .setColor(incidentCount > 0 ? 0xED4245 : 0x0080FF);
@@ -149,16 +134,9 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
+// Temporary dummy function until incident-panel.js is connected
+function getIncidentCount() {
+    return 0; // TODO: link this with your incident-panel storage
+}
+
 client.login(process.env.BOT_TOKEN);
-
-
-
-
-
-
-
-
-
-
-
-
