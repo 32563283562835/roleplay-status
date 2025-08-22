@@ -715,6 +715,8 @@ setupIncidentPanel(client, config = {}) {
     console.log('✅ Incident Management Panel setup complete!');
 },
 
+// Vervang alleen deze initializeIncidentPanel functie in je module.exports:
+
 async initializeIncidentPanel(client) {
     try {
         // Initialize bot status
@@ -722,7 +724,11 @@ async initializeIncidentPanel(client) {
         
         // Update overview message on startup
         setTimeout(async () => {
-            await updateOverviewMessage(client);
+            try {
+                await module.exports.updateOverviewMessage(client);
+            } catch (error) {
+                console.error('Error updating overview message:', error);
+            }
         }, 2000);
 
         // Start interval for bot status updates
