@@ -688,48 +688,57 @@ module.exports = {
         });
     },
 
-    setupIncidentPanel(client, config = {}) {
-        console.log('🚨 Setting up Incident Management Panel...');
+    // Vervang alleen deze twee functies in je module.exports:
+
+setupIncidentPanel(client, config = {}) {
+    console.log('🚨 Setting up Incident Management Panel...');
+    
+    // Override config if provided
+    if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
+    if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
+    if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
+
+    // Bewaar een referentie naar de module exports
+    const moduleExports = module.exports;
+
+    // Wait for client to be ready before doing anything
+    if (client.isReady()) {
+        // Client is already ready, initialize immediately
+        moduleExports.initializeIncidentPanel(client);
+    } else {
+        // Wait for client to be ready
+        client.once('ready', () => {
+            moduleExports.initializeIncidentPanel(client);
+        });
+    }
+
+    console.log('✅ Incident Management Panel setup complete!');
+},
+
+async initializeIncidentPanel(client) {
+    try {
+        // Initialize bot status
+        await updateBotStatus(client);
         
-        // Override config if provided
-        if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
-        if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
-        if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
+        // Update overview message on startup
+        setTimeout(async () => {
+            await updateOverviewMessage(client);
+        }, 2000);
 
-        // Wait for client to be ready before doing anything
-        if (client.isReady()) {
-            // Client is already ready, initialize immediately
-            this.initializeIncidentPanel(client);
-        } else {
-            // Wait for client to be ready
-            client.once('ready', () => {
-                this.initializeIncidentPanel(client);
-            });
-        }
-
-        console.log('✅ Incident Management Panel setup complete!');
-    },
-
-    async initializeIncidentPanel(client) {
-        try {
-            // Initialize bot status
-            await updateBotStatus(client);
-            
-            // Update overview message on startup
-            setTimeout(async () => {
-                await updateOverviewMessage(client);
-            }, 2000);
-
-            // Start interval for bot status updates
-            setInterval(async () => {
+        // Start interval for bot status updates
+        setInterval(async () => {
+            try {
                 await updateBotStatus(client);
-            }, 5 * 60 * 1000); // Every 5 minutes
+            } catch (error) {
+                console.error('Error updating bot status:', error);
+            }
+        }, 5 * 60 * 1000); // Every 5 minutes
 
-            console.log('🎯 Incident panel initialized successfully!');
-        } catch (error) {
-            console.error('❌ Error initializing incident panel:', error);
-        }
-    },
+        console.log('🎯 Incident panel initialized successfully!');
+    } catch (error) {
+        console.error('❌ Error initializing incident panel:', error);
+    }
+},
 
     // Button interaction handler
     async handleButtonInteraction(interaction, client) {
