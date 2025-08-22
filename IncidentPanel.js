@@ -690,6 +690,7 @@ module.exports = {
 
     // NIEUWE FUNCTIE - voeg deze toe:
    // Vervang alleen deze setupIncidentPanel functie in je module.exports:
+// Vervang alleen deze setupIncidentPanel functie in je module.exports:
 setupIncidentPanel(client, config = {}) {
     console.log('🚨 Setting up Incident Management Panel...');
     
@@ -698,16 +699,41 @@ setupIncidentPanel(client, config = {}) {
     if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
     if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
 
-    // Initialize bot status - gebruik de functie direct
-    updateBotStatus(client);
-    
-    // Update overview message on startup
-    setTimeout(() => {
-        updateOverviewMessage(client);
-    }, 2000);
+    // Wait for client to be ready before doing anything
+    if (client.isReady()) {
+        // Client is already ready, initialize immediately
+        initializeIncidentPanel(client);
+    } else {
+        // Wait for client to be ready
+        client.once('ready', () => {
+            initializeIncidentPanel(client);
+        });
+    }
 
     console.log('✅ Incident Management Panel setup complete!');
-    
+},
+
+// Voeg deze helper functie toe aan je exports (na setupIncidentPanel):
+async initializeIncidentPanel(client) {
+    try {
+        // Initialize bot status
+        await updateBotStatus(client);
+        
+        // Update overview message on startup
+        setTimeout(async () => {
+            await updateOverviewMessage(client);
+        }, 2000);
+
+        // Start interval for bot status updates
+        setInterval(async () => {
+            await updateBotStatus(client);
+        }, 5 * 60 * 1000); // Every 5 minutes
+
+        console.log('🎯 Incident panel initialized successfully!');
+    } catch (error) {
+        console.error('❌ Error initializing incident panel:', error);
+    }
+},
     // Start interval for bot status updates
     setInterval(async () => {
         await updateBotStatus(client);
