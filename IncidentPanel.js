@@ -669,6 +669,7 @@ async function updateBotStatus(client) {
 }
 
 // Main command handler
+// Voeg deze setupIncidentPanel functie toe aan je exports
 module.exports = {
     name: 'incident-panel',
     description: 'Opens the incident management panel',
@@ -685,6 +686,26 @@ module.exports = {
             embeds: [embed],
             components: components
         });
+    },
+
+    // NIEUWE FUNCTIE - voeg deze toe:
+    setupIncidentPanel(client, config = {}) {
+        console.log('🚨 Setting up Incident Management Panel...');
+        
+        // Override config if provided
+        if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
+        if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
+        if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
+
+        // Initialize bot status
+        this.initializeBotStatus(client);
+        
+        // Update overview message on startup
+        setTimeout(() => {
+            this.updateOverviewMessage(client);
+        }, 2000);
+
+        console.log('✅ Incident Management Panel setup complete!');
     },
 
     // Button interaction handler
@@ -926,20 +947,6 @@ module.exports = {
 
             } else if (customId === 'incident_apply_filter') {
                 const filterValue = interaction.values[0];
-                const [, filterType, value] = filterValue.split('_');
-                
-                const filters = { [filterType]: value };
-                const filteredIncidents = IncidentUtils.getIncidents(filters);
-                const embed = EmbedManager.createIncidentListEmbed(filteredIncidents, 1, filters);
-                const components = ComponentManager.createIncidentListComponents(1, Math.ceil(filteredIncidents.length / 5), filters);
-
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId === 'incident_stats') {
-const filterValue = interaction.values[0];
                 const [, filterType, value] = filterValue.split('_');
                 
                 const filters = { [filterType]: value };
@@ -1230,24 +1237,3 @@ const filterValue = interaction.values[0];
         }, 5 * 60 * 1000);
     }
 };
-
-// Update overview message function
-async function updateOverviewMessage(client) {
-    const overviewChannel = client.channels.cache.get(CONFIG.INCIDENT_CHANNEL_ID);
-    if (!overviewChannel) return;
-
-    const embed = EmbedManager.createOverviewEmbed();
-    
-    if (overviewMessageId) {
-        try {
-            const message = await overviewChannel.messages.fetch(overviewMessageId);
-            await message.edit({ embeds: [embed] });
-        } catch (error) {
-            const newMessage = await overviewChannel.send({ embeds: [embed] });
-            overviewMessageId = newMessage.id;
-        }
-    } else {
-        const newMessage = await overviewChannel.send({ embeds: [embed] });
-        overviewMessageId = newMessage.id;
-    }
-}
