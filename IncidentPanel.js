@@ -689,24 +689,30 @@ module.exports = {
     },
 
     // NIEUWE FUNCTIE - voeg deze toe:
-    setupIncidentPanel(client, config = {}) {
-        console.log('🚨 Setting up Incident Management Panel...');
-        
-        // Override config if provided
-        if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
-        if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
-        if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
+   // Vervang alleen deze setupIncidentPanel functie in je module.exports:
+setupIncidentPanel(client, config = {}) {
+    console.log('🚨 Setting up Incident Management Panel...');
+    
+    // Override config if provided
+    if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
+    if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
+    if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
 
-        // Initialize bot status
-        this.initializeBotStatus(client);
-        
-        // Update overview message on startup
-        setTimeout(() => {
-            this.updateOverviewMessage(client);
-        }, 2000);
+    // Initialize bot status - gebruik de functie direct
+    updateBotStatus(client);
+    
+    // Update overview message on startup
+    setTimeout(() => {
+        updateOverviewMessage(client);
+    }, 2000);
 
-        console.log('✅ Incident Management Panel setup complete!');
-    },
+    console.log('✅ Incident Management Panel setup complete!');
+    
+    // Start interval for bot status updates
+    setInterval(async () => {
+        await updateBotStatus(client);
+    }, 5 * 60 * 1000); // Every 5 minutes
+},
 
     // Button interaction handler
     async handleButtonInteraction(interaction, client) {
