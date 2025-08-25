@@ -20,7 +20,7 @@ const client = new Client({
     ]
 });
 
-/ Initialize commands collection
+// Initialize commands collection
 client.commands = new Collection();
 
 // Load the incident panel module
@@ -216,6 +216,7 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
