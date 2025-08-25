@@ -16,7 +16,8 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.EmbedBuilder
     ]
 });
 
@@ -216,6 +217,7 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
