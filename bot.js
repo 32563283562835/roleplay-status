@@ -1,5 +1,5 @@
 require('./keep_alive');
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,12 +14,11 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.EmbedBuilder
+        GatewayIntentBits.MessageContent
     ]
 });
+
 
 // Initialize commands collection
 client.commands = new Collection();
@@ -217,6 +216,7 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
