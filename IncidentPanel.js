@@ -670,11 +670,11 @@ async function updateBotStatus(client) {
 
 // Main command handler
 // Vervang je hele module.exports aan het einde van je bestand met dit:
+// Vervang je hele module.exports sectie aan het einde van je bestand met dit:
 module.exports = {
     name: 'incident-panel',
     description: 'Opens the incident management panel',
     
-    // VOEG HIER DE EXECUTE FUNCTIE TOE
     execute(message, args, client) {
         // Check if user is authorized
         if (message.author.id !== CONFIG.AUTHORIZED_USER_ID) {
@@ -689,65 +689,60 @@ module.exports = {
             components: components
         });
     },
-    
+
     setupIncidentPanel(client, config = {}) {
-        // ... rest van je code
-
-setupIncidentPanel(client, config = {}) {
-    console.log('🚨 Setting up Incident Management Panel...');
-    
-    // Override config if provided
-    if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
-    if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
-    if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
-
-    // Bewaar een referentie naar de module exports
-    const moduleExports = module.exports;
-
-    // Wait for client to be ready before doing anything
-    if (client.isReady()) {
-        // Client is already ready, initialize immediately
-        moduleExports.initializeIncidentPanel(client);
-    } else {
-        // Wait for client to be ready
-        client.once('ready', () => {
-            moduleExports.initializeIncidentPanel(client);
-        });
-    }
-
-    console.log('✅ Incident Management Panel setup complete!');
-},
-
-// Vervang alleen deze initializeIncidentPanel functie in je module.exports:
-
-async initializeIncidentPanel(client) {
-    try {
-        // Initialize bot status
-        await updateBotStatus(client);
+        console.log('🚨 Setting up Incident Management Panel...');
         
-        // Update overview message on startup
-        setTimeout(async () => {
-            try {
-                await module.exports.updateOverviewMessage(client);
-            } catch (error) {
-                console.error('Error updating overview message:', error);
-            }
-        }, 2000);
+        // Override config if provided
+        if (config.AUTHORIZED_USER_ID) CONFIG.AUTHORIZED_USER_ID = config.AUTHORIZED_USER_ID;
+        if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
+        if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
 
-        // Start interval for bot status updates
-        setInterval(async () => {
-            try {
-                await updateBotStatus(client);
-            } catch (error) {
-                console.error('Error updating bot status:', error);
-            }
-        }, 5 * 60 * 1000); // Every 5 minutes
+        // Bewaar een referentie naar de module exports
+        const moduleExports = module.exports;
 
-        console.log('🎯 Incident panel initialized successfully!');
-    } catch (error) {
-        console.error('❌ Error initializing incident panel:', error);
-    }
-},
+        // Wait for client to be ready before doing anything
+        if (client.isReady()) {
+            // Client is already ready, initialize immediately
+            moduleExports.initializeIncidentPanel(client);
+        } else {
+            // Wait for client to be ready
+            client.once('ready', () => {
+                moduleExports.initializeIncidentPanel(client);
+            });
+        }
+
+        console.log('✅ Incident Management Panel setup complete!');
+    },
+
+    async initializeIncidentPanel(client) {
+        try {
+            // Initialize bot status
+            await updateBotStatus(client);
+            
+            // Update overview message on startup
+            setTimeout(async () => {
+                try {
+                    await module.exports.updateOverviewMessage(client);
+                } catch (error) {
+                    console.error('Error updating overview message:', error);
+                }
+            }, 2000);
+
+            // Start interval for bot status updates
+            setInterval(async () => {
+                try {
+                    await updateBotStatus(client);
+                } catch (error) {
+                    console.error('Error updating bot status:', error);
+                }
+            }, 5 * 60 * 1000); // Every 5 minutes
+
+            console.log('🎯 Incident panel initialized successfully!');
+        } catch (error) {
+            console.error('❌ Error initializing incident panel:', error);
+        }
+    },
 
     // Button interaction handler
     async handleButtonInteraction(interaction, client) {
@@ -864,7 +859,7 @@ async initializeIncidentPanel(client) {
                     }
 
                     // Update overview message
-                    await updateOverviewMessage(client);
+                    await this.updateOverviewMessage(client);
                     
                     // Update bot status
                     await updateBotStatus(client);
@@ -1075,7 +1070,7 @@ async initializeIncidentPanel(client) {
                 }
 
                 // Update overview message
-                await updateOverviewMessage(client);
+                await this.updateOverviewMessage(client);
                 
                 // Update bot status
                 await updateBotStatus(client);
@@ -1124,7 +1119,7 @@ async initializeIncidentPanel(client) {
                     }
 
                     // Update overview message
-                    await updateOverviewMessage(client);
+                    await this.updateOverviewMessage(client);
                     
                     // Update bot status
                     await updateBotStatus(client);
@@ -1220,7 +1215,7 @@ async initializeIncidentPanel(client) {
                     }
 
                     // Update overview message
-                    await updateOverviewMessage(client);
+                    await this.updateOverviewMessage(client);
                     
                     // Update bot status
                     await updateBotStatus(client);
