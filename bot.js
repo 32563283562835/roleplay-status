@@ -3,16 +3,6 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-// Create a new client instance
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ]
-});
-
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
 
@@ -24,6 +14,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
@@ -225,6 +216,7 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
