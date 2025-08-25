@@ -1,5 +1,17 @@
 require('./keep_alive');
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+
+// Create a new client instance
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ]
+});
 
 // Vul hier het ID in van je main bot (niet de status bot)
 const mainBotId = '1399496618121892000';
@@ -17,14 +29,74 @@ const client = new Client({
     ]
 });
 
-// === Incident Panel koppelen ===
-const { setupIncidentPanel } = require('./IncidentPanel');
-setupIncidentPanel(client, {
-  allowedUserId: '1329813179865235467',
-  auditChannelId: '1407310001718038609',       // private audit trail
-  notificationChannelId: '1406381100980371557', // creation notifications
-  overviewChannelId: '1406381100980371557',     // rolling overview lives here
-  dataDir: './data'                             // JSON persistence
+/ Initialize commands collection
+client.commands = new Collection();
+
+// Load the incident panel module
+const incidentPanel = require('./IncidentPanel.js');
+
+// Store the incident panel in commands collection
+client.commands.set(incidentPanel.name, incidentPanel);
+
+// Bot ready event
+client.once('ready', () => {
+    console.log(`✅ Bot is online as ${client.user.tag}!`);
+    
+    // Setup incident panel
+    incidentPanel.setupIncidentPanel(client, {
+        AUTHORIZED_USER_ID: '1329813179865235467',    // Vervang met jouw Discord User ID
+        INCIDENT_CHANNEL_ID: '1406381100980371557',   // Vervang met het incident kanaal ID
+        AUDIT_CHANNEL_ID: '1407310001718038609'       // Vervang met het audit kanaal ID
+    });
+});
+
+// Message event for commands
+client.on('messageCreate', async (message) => {
+    // Ignore bot messages
+    if (message.author.bot) return;
+    
+    // Check if message starts with prefix
+    const prefix = '!';
+    if (!message.content.startsWith(prefix)) return;
+    
+    // Parse command and arguments
+    const args = message.content.slice(prefix.length).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+    
+    // Get command from collection
+    const command = client.commands.get(commandName);
+    
+    if (!command) return;
+    
+    try {
+        // Execute the command
+        await command.execute(message, args, client);
+    } catch (error) {
+        console.error(`Error executing command ${commandName}:`, error);
+        message.reply('There was an error executing that command!').catch(console.error);
+    }
+});
+
+// Handle button and modal interactions for incident panel
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (interaction.isButton() || interaction.isStringSelectMenu()) {
+            // Handle button interactions
+            await incidentPanel.handleButtonInteraction(interaction, client);
+        } else if (interaction.isModalSubmit()) {
+            // Handle modal interactions
+            await incidentPanel.handleModalInteraction(interaction, client);
+        }
+    } catch (error) {
+        console.error('Error handling interaction:', error);
+        
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({
+                content: 'An error occurred while processing your request.',
+                ephemeral: true
+            }).catch(console.error);
+        }
+    }
 });
 
 let lastSeenOnline = null;
@@ -153,6 +225,7 @@ function getIncidentCount() {
 }
 
 client.login(process.env.BOT_TOKEN);
+
 
 
 
