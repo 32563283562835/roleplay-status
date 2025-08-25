@@ -673,6 +673,8 @@ async function updateBotStatus(client) {
 module.exports = {
     name: 'incident-panel',
     description: 'Opens the incident management panel',
+    
+    // VOEG HIER DE EXECUTE FUNCTIE TOE
     execute(message, args, client) {
         // Check if user is authorized
         if (message.author.id !== CONFIG.AUTHORIZED_USER_ID) {
@@ -687,8 +689,9 @@ module.exports = {
             components: components
         });
     },
-
-    // Vervang alleen deze twee functies in je module.exports:
+    
+    setupIncidentPanel(client, config = {}) {
+        // ... rest van je code
 
 setupIncidentPanel(client, config = {}) {
     console.log('🚨 Setting up Incident Management Panel...');
