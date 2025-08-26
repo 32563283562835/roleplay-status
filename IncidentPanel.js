@@ -363,8 +363,39 @@ class ComponentManager {
         return [row1, row2];
     }
 
-    static createIncidentListComponents(page, totalPages, filters = {}) {
+    static createIncidentSelectMenu(incidents, page = 1) {
+        const itemsPerPage = 5;
+        const startIndex = (page - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const paginatedIncidents = incidents.slice(startIndex, endIndex);
+        
+        if (paginatedIncidents.length === 0) return null;
+        
+        const options = paginatedIncidents.map(incident => ({
+            label: `${incident.id} - ${incident.title.substring(0, 50)}${incident.title.length > 50 ? '...' : ''}`,
+            description: `${incident.priority} | ${incident.status} | ${incident.assignedTo}`,
+            value: `incident_select_${incident.id}`,
+            emoji: incident.status === CONFIG.STATUS.RESOLVED ? '✅' : 
+                  incident.status === CONFIG.STATUS.IN_PROGRESS ? '🔄' : '🔴'
+        }));
+
+        return new ActionRowBuilder()
+            .addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('incident_select_menu')
+                    .setPlaceholder('Select an incident to view details...')
+                    .addOptions(options)
+            );
+    }
+
+    static createIncidentListComponents(incidents, page, totalPages, filters = {}) {
         const components = [];
+        
+        // Incident selection menu
+        const selectMenu = this.createIncidentSelectMenu(incidents, page);
+        if (selectMenu) {
+            components.push(selectMenu);
+        }
         
         // Navigation row
         const navRow = new ActionRowBuilder();
@@ -645,32 +676,34 @@ class ModalManager {
 
 // Bot status update function
 async function updateBotStatus(client) {
-    const activeIncidents = IncidentUtils.getIncidents()
-        .filter(inc => inc.status !== CONFIG.STATUS.RESOLVED && inc.status !== CONFIG.STATUS.CLOSED);
-    
-    if (activeIncidents.length === 0) {
-        await client.user.setPresence({
-            status: 'online',
-            activities: [{
-                name: 'No incidents found...',
-                type: 'WATCHING'
-            }]
-        });
-    } else {
-        const incidentTitles = activeIncidents.map(inc => inc.title).join(', ');
-        await client.user.setPresence({
-            status: 'dnd',
-            activities: [{
-                name: incidentTitles.length > 50 ? incidentTitles.substring(0, 47) + '...' : incidentTitles,
-                type: 'WATCHING'
-            }]
-        });
+    try {
+        const activeIncidents = IncidentUtils.getIncidents()
+            .filter(inc => inc.status !== CONFIG.STATUS.RESOLVED && inc.status !== CONFIG.STATUS.CLOSED);
+        
+        if (activeIncidents.length === 0) {
+            await client.user.setPresence({
+                status: 'online',
+                activities: [{
+                    name: 'No incidents found...',
+                    type: 'WATCHING'
+                }]
+            });
+        } else {
+            const incidentTitles = activeIncidents.map(inc => inc.title).join(', ');
+            await client.user.setPresence({
+                status: 'dnd',
+                activities: [{
+                    name: incidentTitles.length > 50 ? incidentTitles.substring(0, 47) + '...' : incidentTitles,
+                    type: 'WATCHING'
+                }]
+            });
+        }
+    } catch (error) {
+        console.error('Error updating bot status:', error);
     }
 }
 
-// Main command handler
-// Vervang je hele module.exports aan het einde van je bestand met dit:
-// Vervang je hele module.exports sectie aan het einde van je bestand met dit:
+// Main module exports
 module.exports = {
     name: 'incident-panel',
     description: 'Opens the incident management panel',
@@ -681,13 +714,18 @@ module.exports = {
             return; // Silently ignore unauthorized users
         }
 
-        const embed = EmbedManager.createMainPanel(message.author);
-        const components = ComponentManager.createMainPanelComponents();
+        try {
+            const embed = EmbedManager.createMainPanel(message.author);
+            const components = ComponentManager.createMainPanelComponents();
 
-        message.reply({
-            embeds: [embed],
-            components: components
-        });
+            message.reply({
+                embeds: [embed],
+                components: components
+            });
+        } catch (error) {
+            console.error('Error executing incident panel command:', error);
+            message.reply('An error occurred while creating the incident panel.');
+        }
     },
 
     setupIncidentPanel(client, config = {}) {
@@ -698,17 +736,12 @@ module.exports = {
         if (config.INCIDENT_CHANNEL_ID) CONFIG.INCIDENT_CHANNEL_ID = config.INCIDENT_CHANNEL_ID;
         if (config.AUDIT_CHANNEL_ID) CONFIG.AUDIT_CHANNEL_ID = config.AUDIT_CHANNEL_ID;
 
-        // Bewaar een referentie naar de module exports
-        const moduleExports = module.exports;
-
         // Wait for client to be ready before doing anything
         if (client.isReady()) {
-            // Client is already ready, initialize immediately
-            moduleExports.initializeIncidentPanel(client);
+            this.initializeIncidentPanel(client);
         } else {
-            // Wait for client to be ready
             client.once('ready', () => {
-                moduleExports.initializeIncidentPanel(client);
+                this.initializeIncidentPanel(client);
             });
         }
 
@@ -723,7 +756,7 @@ module.exports = {
             // Update overview message on startup
             setTimeout(async () => {
                 try {
-                    await module.exports.updateOverviewMessage(client);
+                    await this.updateOverviewMessage(client);
                 } catch (error) {
                     console.error('Error updating overview message:', error);
                 }
@@ -754,172 +787,10 @@ module.exports = {
         const customId = interaction.customId;
 
         try {
-            if (customId === 'incident_panel_main') {
-                const embed = EmbedManager.createMainPanel(interaction.user);
-                const components = ComponentManager.createMainPanelComponents();
-                
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId === 'incident_create') {
-                const modal = ModalManager.createIncidentModal();
-                await interaction.showModal(modal);
-
-            } else if (customId === 'incident_list' || customId.startsWith('incident_list_page_')) {
-                const page = customId.startsWith('incident_list_page_') ? 
-                    parseInt(customId.split('_')[3]) : 1;
-                
-                const allIncidents = IncidentUtils.getIncidents();
-                const embed = EmbedManager.createIncidentListEmbed(allIncidents, page);
-                const totalPages = Math.ceil(allIncidents.length / 5);
-                const components = ComponentManager.createIncidentListComponents(page, totalPages);
-
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId === 'incident_search') {
-                const modal = ModalManager.createSearchModal();
-                await interaction.showModal(modal);
-
-            } else if (customId === 'incident_filter') {
-                const components = [ComponentManager.createFilterSelectMenu()];
-                
-                await interaction.reply({
-                    content: 'Select a filter type:',
-                    components: components,
-                    ephemeral: true
-                });
-
-            } else if (customId === 'incident_refresh' || customId === 'incident_list_refresh') {
-                const embed = EmbedManager.createMainPanel(interaction.user);
-                const components = ComponentManager.createMainPanelComponents();
-                
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId.startsWith('incident_edit_')) {
-                const incidentId = customId.replace('incident_edit_', '');
-                const modal = ModalManager.createIncidentModal(incidentId);
-                await interaction.showModal(modal);
-
-            } else if (customId.startsWith('incident_note_')) {
-                const incidentId = customId.replace('incident_note_', '');
-                const modal = ModalManager.createNoteModal(incidentId);
-                await interaction.showModal(modal);
-
-            } else if (customId.startsWith('incident_resolve_')) {
-                const incidentId = customId.replace('incident_resolve_', '');
-                const modal = ModalManager.createResolveModal(incidentId);
-                await interaction.showModal(modal);
-
-            } else if (customId.startsWith('incident_delete_')) {
-                const incidentId = customId.replace('incident_delete_', '');
-                const incident = incidents.get(incidentId);
-                
-                if (!incident) {
-                    return interaction.reply({ content: 'Incident not found!', ephemeral: true });
-                }
-
-                const confirmRow = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`confirm_delete_${incidentId}`)
-                            .setLabel('Confirm Delete')
-                            .setStyle(ButtonStyle.Danger)
-                            .setEmoji('✅'),
-                        new ButtonBuilder()
-                            .setCustomId('cancel_delete')
-                            .setLabel('Cancel')
-                            .setStyle(ButtonStyle.Secondary)
-                            .setEmoji('❌')
-                    );
-
-                await interaction.reply({
-                    content: `⚠️ **Are you sure you want to delete incident ${incidentId}?**\n\n**Title:** ${incident.title}\n\nThis action cannot be undone.`,
-                    components: [confirmRow],
-                    ephemeral: true
-                });
-
-            } else if (customId.startsWith('confirm_delete_')) {
-                const incidentId = customId.replace('confirm_delete_', '');
-                const incident = incidents.get(incidentId);
-                
-                if (IncidentUtils.deleteIncident(incidentId, interaction.user.id)) {
-                    // Send audit log
-                    const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
-                    if (auditChannel) {
-                        const auditEmbed = EmbedManager.createAuditEmbed(incident, 'DELETE', interaction.user.id, 'Incident deleted by user');
-                        await auditChannel.send({ embeds: [auditEmbed] });
-                    }
-
-                    // Update overview message
-                    await this.updateOverviewMessage(client);
-                    
-                    // Update bot status
-                    await updateBotStatus(client);
-
-                    await interaction.update({
-                        content: `✅ Incident **${incidentId}** has been deleted successfully.`,
-                        components: [],
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.update({
-                        content: '❌ Failed to delete incident. It may not exist.',
-                        components: [],
-                        ephemeral: true
-                    });
-                }
-
-            } else if (customId === 'cancel_delete') {
-                await interaction.update({
-                    content: '❌ Deletion cancelled.',
-                    components: [],
-                    ephemeral: true
-                });
-
-            } else if (customId.startsWith('incident_history_')) {
-                const incidentId = customId.replace('incident_history_', '');
-                const incident = incidents.get(incidentId);
-                
-                if (!incident) {
-                    return interaction.reply({ content: 'Incident not found!', ephemeral: true });
-                }
-
-                const historyEmbed = new EmbedBuilder()
-                    .setTitle(`📚 History - ${incidentId}`)
-                    .setDescription(`**${incident.title}**`)
-                    .setColor(CONFIG.COLORS.INFO);
-
-                const historyText = incident.history.slice(-10).map(entry => 
-                    `**${entry.action}** by <@${entry.user}>\n<t:${Math.floor(entry.timestamp.getTime() / 1000)}:f> - ${entry.details}`
-                ).join('\n\n');
-
-                historyEmbed.addFields({ name: 'Recent Activity', value: historyText || 'No history available' });
-
-                const backButton = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`incident_detail_${incidentId}`)
-                            .setLabel('Back to Details')
-                            .setStyle(ButtonStyle.Secondary)
-                            .setEmoji('⬅️')
-                    );
-
-                await interaction.reply({
-                    embeds: [historyEmbed],
-                    components: [backButton],
-                    ephemeral: true
-                });
-
-            } else if (customId.startsWith('incident_detail_')) {
-                const incidentId = customId.replace('incident_detail_', '');
+            // Handle select menu interactions
+            if (customId === 'incident_select_menu') {
+                const selectedValue = interaction.values[0];
+                const incidentId = selectedValue.replace('incident_select_', '');
                 const incident = incidents.get(incidentId);
                 
                 if (!incident) {
@@ -929,337 +800,410 @@ module.exports = {
                 const embed = EmbedManager.createIncidentDetailEmbed(incident);
                 const components = ComponentManager.createIncidentDetailComponents(incidentId);
 
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId === 'incident_filter_select') {
-                const filterType = interaction.values[0];
-                
-                if (filterType === 'clear') {
-                    const allIncidents = IncidentUtils.getIncidents();
-                    const embed = EmbedManager.createIncidentListEmbed(allIncidents, 1);
-                    const components = ComponentManager.createIncidentListComponents(1, Math.ceil(allIncidents.length / 5));
-
-                    await interaction.update({
-                        embeds: [embed],
-                        components: components
-                    });
-                } else {
-                    // Handle specific filter types
-                    let options = [];
-                    
-                    if (filterType === 'status') {
-                        options = Object.values(CONFIG.STATUS).map(status => ({
-                            label: status,
-                            value: `filter_status_${status}`,
-                            emoji: status === CONFIG.STATUS.RESOLVED ? '✅' : 
-                                  status === CONFIG.STATUS.IN_PROGRESS ? '🔄' : '🔴'
-                        }));
-                    } else if (filterType === 'priority') {
-                        options = Object.values(CONFIG.PRIORITY).map(priority => ({
-                            label: priority,
-                            value: `filter_priority_${priority}`,
-                            emoji: priority === CONFIG.PRIORITY.CRITICAL ? '🔥' :
-                                  priority === CONFIG.PRIORITY.HIGH ? '⚠️' :
-                                  priority === CONFIG.PRIORITY.MEDIUM ? '📋' : '📝'
-                        }));
-                    }
-
-                    const selectMenu = new ActionRowBuilder()
-                        .addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('incident_apply_filter')
-                                .setPlaceholder(`Select ${filterType}`)
-                                .addOptions(options)
-                        );
-
-                    await interaction.update({
-                        content: `Select ${filterType} to filter by:`,
-                        components: [selectMenu]
-                    });
-                }
-
-            } else if (customId === 'incident_apply_filter') {
-                const filterValue = interaction.values[0];
-                const [, filterType, value] = filterValue.split('_');
-                
-                const filters = { [filterType]: value };
-                const filteredIncidents = IncidentUtils.getIncidents(filters);
-                const embed = EmbedManager.createIncidentListEmbed(filteredIncidents, 1, filters);
-                const components = ComponentManager.createIncidentListComponents(1, Math.ceil(filteredIncidents.length / 5), filters);
-
-                await interaction.update({
-                    embeds: [embed],
-                    components: components
-                });
-
-            } else if (customId === 'incident_stats') {
-                const allIncidents = Array.from(incidents.values());
-                const statsEmbed = new EmbedBuilder()
-                    .setTitle('📊 Incident Statistics')
-                    .setColor(CONFIG.COLORS.INFO)
-                    .addFields(
-                        { name: '📈 Total Incidents', value: allIncidents.length.toString(), inline: true },
-                        { name: '🔴 Open', value: allIncidents.filter(i => i.status === CONFIG.STATUS.OPEN).length.toString(), inline: true },
-                        { name: '🔄 In Progress', value: allIncidents.filter(i => i.status === CONFIG.STATUS.IN_PROGRESS).length.toString(), inline: true },
-                        { name: '✅ Resolved', value: allIncidents.filter(i => i.status === CONFIG.STATUS.RESOLVED).length.toString(), inline: true },
-                        { name: '🔒 Closed', value: allIncidents.filter(i => i.status === CONFIG.STATUS.CLOSED).length.toString(), inline: true },
-                        { name: '🔥 Critical', value: allIncidents.filter(i => i.priority === CONFIG.PRIORITY.CRITICAL).length.toString(), inline: true }
-                    )
-                    .setTimestamp();
-
-                await interaction.reply({
-                    embeds: [statsEmbed],
-                    ephemeral: true
-                });
-            }
-
-        } catch (error) {
-            console.error('Error handling button interaction:', error);
-            await interaction.reply({ 
-                content: 'An error occurred while processing your request.', 
-                ephemeral: true 
-            }).catch(console.error);
-        }
-    },
-
-    // Modal interaction handler
-    async handleModalInteraction(interaction, client) {
-        if (!interaction.isModalSubmit()) return;
-        if (interaction.user.id !== CONFIG.AUTHORIZED_USER_ID) {
-            return interaction.reply({ content: 'You are not authorized to use this panel.', ephemeral: true });
-        }
-
-        const customId = interaction.customId;
-
-        try {
-            if (customId === 'incident_create_modal') {
-                const title = interaction.fields.getTextInputValue('incident_title');
-                const description = interaction.fields.getTextInputValue('incident_description');
-                const priority = interaction.fields.getTextInputValue('incident_priority') || CONFIG.PRIORITY.MEDIUM;
-                const assignee = interaction.fields.getTextInputValue('incident_assignee') || 'Unassigned';
-
-                // Validate priority
-                const validPriorities = Object.values(CONFIG.PRIORITY).map(p => p.toLowerCase());
-                const normalizedPriority = validPriorities.includes(priority.toLowerCase()) 
-                    ? Object.values(CONFIG.PRIORITY).find(p => p.toLowerCase() === priority.toLowerCase())
-                    : CONFIG.PRIORITY.MEDIUM;
-
-                const incident = IncidentUtils.createIncident({
-                    title,
-                    description,
-                    priority: normalizedPriority,
-                    assignedTo: assignee,
-                    createdBy: interaction.user.id
-                });
-
-                // Send to incident channel
-                const incidentChannel = client.channels.cache.get(CONFIG.INCIDENT_CHANNEL_ID);
-                if (incidentChannel) {
-                    const embed = EmbedManager.createIncidentDetailEmbed(incident);
-                    await incidentChannel.send({ embeds: [embed] });
-                }
-
-                // Send audit log
-                const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
-                if (auditChannel) {
-                    const auditEmbed = EmbedManager.createAuditEmbed(incident, 'CREATE', interaction.user.id, 'New incident created');
-                    await auditChannel.send({ embeds: [auditEmbed] });
-                }
-
-                // Update overview message
-                await this.updateOverviewMessage(client);
-                
-                // Update bot status
-                await updateBotStatus(client);
-
-                await interaction.reply({
-                    content: `✅ Incident **${incident.id}** created successfully!\n**Title:** ${incident.title}`,
-                    ephemeral: true
-                });
-
-            } else if (customId.startsWith('incident_edit_modal_')) {
-                const incidentId = customId.replace('incident_edit_modal_', '');
-                const title = interaction.fields.getTextInputValue('incident_title');
-                const description = interaction.fields.getTextInputValue('incident_description');
-                const priority = interaction.fields.getTextInputValue('incident_priority');
-                const status = interaction.fields.getTextInputValue('incident_status');
-                const assignee = interaction.fields.getTextInputValue('incident_assignee');
-
-                // Validate inputs
-                const validPriorities = Object.values(CONFIG.PRIORITY).map(p => p.toLowerCase());
-                const validStatuses = Object.values(CONFIG.STATUS).map(s => s.toLowerCase());
-                
-                const normalizedPriority = validPriorities.includes(priority.toLowerCase()) 
-                    ? Object.values(CONFIG.PRIORITY).find(p => p.toLowerCase() === priority.toLowerCase())
-                    : CONFIG.PRIORITY.MEDIUM;
-
-                const normalizedStatus = validStatuses.includes(status.toLowerCase())
-                    ? Object.values(CONFIG.STATUS).find(s => s.toLowerCase() === status.toLowerCase())
-                    : CONFIG.STATUS.OPEN;
-
-                const updates = {
-                    title,
-                    description,
-                    priority: normalizedPriority,
-                    status: normalizedStatus,
-                    assignedTo: assignee
-                };
-
-                const updatedIncident = IncidentUtils.updateIncident(incidentId, updates, interaction.user.id);
-
-                if (updatedIncident) {
-                    // Send audit log
-                    const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
-                    if (auditChannel) {
-                        const auditEmbed = EmbedManager.createAuditEmbed(updatedIncident, 'UPDATE', interaction.user.id, 'Incident updated');
-                        await auditChannel.send({ embeds: [auditEmbed] });
-                    }
-
-                    // Update overview message
-                    await this.updateOverviewMessage(client);
-                    
-                    // Update bot status
-                    await updateBotStatus(client);
-
-                    await interaction.reply({
-                        content: `✅ Incident **${incidentId}** updated successfully!`,
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.reply({
-                        content: '❌ Failed to update incident. It may not exist.',
-                        ephemeral: true
-                    });
-                }
-
-            } else if (customId === 'incident_search_modal') {
-                const query = interaction.fields.getTextInputValue('search_query');
-                const searchResults = IncidentUtils.getIncidents({ search: query });
-                
-                const embed = EmbedManager.createIncidentListEmbed(searchResults, 1, { search: query });
-                const components = ComponentManager.createIncidentListComponents(1, Math.ceil(searchResults.length / 5), { search: query });
-
-                await interaction.reply({
+                return interaction.reply({
                     embeds: [embed],
                     components: components,
                     ephemeral: true
                 });
+            }
 
-            } else if (customId.startsWith('incident_note_modal_')) {
-                const incidentId = customId.replace('incident_note_modal_', '');
-                const noteContent = interaction.fields.getTextInputValue('note_content');
-                const incident = incidents.get(incidentId);
-
-                if (incident) {
-                    const note = {
-                        content: noteContent,
-                        author: interaction.user.username,
-                        timestamp: new Date()
-                    };
-
-                    incident.notes.push(note);
-                    incident.history.push({
-                        action: 'Note Added',
-                        user: interaction.user.id,
-                        timestamp: new Date(),
-                        details: `Added note: ${noteContent.substring(0, 50)}${noteContent.length > 50 ? '...' : ''}`
-                    });
-
-                    // Send audit log
-                    const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
-                    if (auditChannel) {
-                        const auditEmbed = EmbedManager.createAuditEmbed(incident, 'NOTE_ADDED', interaction.user.id, `Note added: ${noteContent}`);
-                        await auditChannel.send({ embeds: [auditEmbed] });
-                    }
-
-                    await interaction.reply({
-                        content: `✅ Note added to incident **${incidentId}**`,
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.reply({
-                        content: '❌ Incident not found!',
-                        ephemeral: true
-                    });
-                }
-
-            } else if (customId.startsWith('incident_resolve_modal_')) {
-                const incidentId = customId.replace('incident_resolve_modal_', '');
-                const resolveComment = interaction.fields.getTextInputValue('resolve_comment');
+            // Handle button interactions
+            if (customId === 'incident_panel_main') {
+                const embed = EmbedManager.createMainPanel(interaction.user);
+                const components = ComponentManager.createMainPanelComponents();
                 
-                const updates = { 
-                    status: CONFIG.STATUS.RESOLVED,
-                    resolvedAt: new Date()
-                };
+                await interaction.update({
+                   embeds: [embed],
+                   components: components
+               });
+           } else if (customId === 'incident_create') {
+               const modal = ModalManager.createIncidentModal();
+               await interaction.showModal(modal);
+           } else if (customId === 'incident_list') {
+               const allIncidents = IncidentUtils.getIncidents();
+               const embed = EmbedManager.createIncidentListEmbed(allIncidents, 1);
+               const components = ComponentManager.createIncidentListComponents(allIncidents, 1, Math.ceil(allIncidents.length / 5));
+               
+               await interaction.update({
+                   embeds: [embed],
+                   components: components
+               });
+           } else if (customId === 'incident_search') {
+               const modal = ModalManager.createSearchModal();
+               await interaction.showModal(modal);
+           } else if (customId === 'incident_filter') {
+               const selectMenu = ComponentManager.createFilterSelectMenu();
+               await interaction.reply({
+                   content: 'Select a filter type:',
+                   components: [selectMenu],
+                   ephemeral: true
+               });
+           } else if (customId === 'incident_refresh') {
+               const embed = EmbedManager.createMainPanel(interaction.user);
+               const components = ComponentManager.createMainPanelComponents();
+               
+               await interaction.update({
+                   embeds: [embed],
+                   components: components
+               });
+           } else if (customId === 'incident_stats') {
+               const allIncidents = Array.from(incidents.values());
+               const stats = {
+                   total: allIncidents.length,
+                   open: allIncidents.filter(i => i.status === CONFIG.STATUS.OPEN).length,
+                   inProgress: allIncidents.filter(i => i.status === CONFIG.STATUS.IN_PROGRESS).length,
+                   resolved: allIncidents.filter(i => i.status === CONFIG.STATUS.RESOLVED).length,
+                   closed: allIncidents.filter(i => i.status === CONFIG.STATUS.CLOSED).length,
+                   critical: allIncidents.filter(i => i.priority === CONFIG.PRIORITY.CRITICAL).length,
+                   high: allIncidents.filter(i => i.priority === CONFIG.PRIORITY.HIGH).length,
+                   medium: allIncidents.filter(i => i.priority === CONFIG.PRIORITY.MEDIUM).length,
+                   low: allIncidents.filter(i => i.priority === CONFIG.PRIORITY.LOW).length
+               };
 
-                const resolvedIncident = IncidentUtils.updateIncident(incidentId, updates, interaction.user.id);
+               const statsEmbed = new EmbedBuilder()
+                   .setTitle('📊 Incident Statistics')
+                   .addFields(
+                       { name: '📋 Total Incidents', value: stats.total.toString(), inline: true },
+                       { name: '🔴 Open', value: stats.open.toString(), inline: true },
+                       { name: '🔄 In Progress', value: stats.inProgress.toString(), inline: true },
+                       { name: '✅ Resolved', value: stats.resolved.toString(), inline: true },
+                       { name: '🔒 Closed', value: stats.closed.toString(), inline: true },
+                       { name: '\u200b', value: '\u200b', inline: true },
+                       { name: '🔥 Critical', value: stats.critical.toString(), inline: true },
+                       { name: '⚠️ High', value: stats.high.toString(), inline: true },
+                       { name: '📋 Medium', value: stats.medium.toString(), inline: true },
+                       { name: '📝 Low', value: stats.low.toString(), inline: true }
+                   )
+                   .setColor(CONFIG.COLORS.INFO)
+                   .setTimestamp();
 
-                if (resolvedIncident) {
-                    if (resolveComment) {
-                        const note = {
-                            content: `Resolution: ${resolveComment}`,
-                            author: interaction.user.username,
-                            timestamp: new Date()
-                        };
-                        resolvedIncident.notes.push(note);
-                    }
+               await interaction.reply({
+                   embeds: [statsEmbed],
+                   ephemeral: true
+               });
+           } else if (customId.startsWith('incident_list_page_')) {
+               const page = parseInt(customId.split('_').pop());
+               const allIncidents = IncidentUtils.getIncidents();
+               const embed = EmbedManager.createIncidentListEmbed(allIncidents, page);
+               const components = ComponentManager.createIncidentListComponents(allIncidents, page, Math.ceil(allIncidents.length / 5));
+               
+               await interaction.update({
+                   embeds: [embed],
+                   components: components
+               });
+           } else if (customId.startsWith('incident_edit_')) {
+               const incidentId = customId.replace('incident_edit_', '');
+               const modal = ModalManager.createIncidentModal(incidentId);
+               await interaction.showModal(modal);
+           } else if (customId.startsWith('incident_note_')) {
+               const incidentId = customId.replace('incident_note_', '');
+               const modal = ModalManager.createNoteModal(incidentId);
+               await interaction.showModal(modal);
+           } else if (customId.startsWith('incident_history_')) {
+               const incidentId = customId.replace('incident_history_', '');
+               const incident = incidents.get(incidentId);
+               
+               if (!incident) {
+                   return interaction.reply({ content: 'Incident not found!', ephemeral: true });
+               }
 
-                    // Send audit log
-                    const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
-                    if (auditChannel) {
-                        const auditEmbed = EmbedManager.createAuditEmbed(resolvedIncident, 'RESOLVE', interaction.user.id, `Incident resolved: ${resolveComment || 'No comment provided'}`);
-                        await auditChannel.send({ embeds: [auditEmbed] });
-                    }
+               const historyEmbed = new EmbedBuilder()
+                   .setTitle(`📚 History - ${incidentId}`)
+                   .setColor(CONFIG.COLORS.INFO);
 
-                    // Update overview message
-                    await this.updateOverviewMessage(client);
-                    
-                    // Update bot status
-                    await updateBotStatus(client);
+               let historyText = '';
+               incident.history.slice(-10).reverse().forEach(entry => {
+                   historyText += `**${entry.action}** by <@${entry.user}>\n`;
+                   historyText += `<t:${Math.floor(entry.timestamp.getTime() / 1000)}:F>\n`;
+                   historyText += `${entry.details}\n\n`;
+               });
 
-                    await interaction.reply({
-                        content: `✅ Incident **${incidentId}** has been resolved!`,
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.reply({
-                        content: '❌ Failed to resolve incident. It may not exist.',
-                        ephemeral: true
-                    });
-                }
-            }
+               historyEmbed.setDescription(historyText || 'No history available.');
 
-        } catch (error) {
-            console.error('Error handling modal interaction:', error);
-            await interaction.reply({ 
-                content: 'An error occurred while processing your request.', 
-                ephemeral: true 
-            }).catch(console.error);
-        }
-    },
+               await interaction.reply({
+                   embeds: [historyEmbed],
+                   ephemeral: true
+               });
+           } else if (customId.startsWith('incident_resolve_')) {
+               const incidentId = customId.replace('incident_resolve_', '');
+               const modal = ModalManager.createResolveModal(incidentId);
+               await interaction.showModal(modal);
+           } else if (customId.startsWith('incident_delete_')) {
+               const incidentId = customId.replace('incident_delete_', '');
+               
+               const confirmEmbed = new EmbedBuilder()
+                   .setTitle('⚠️ Confirm Deletion')
+                   .setDescription(`Are you sure you want to delete incident **${incidentId}**?\n\nThis action cannot be undone!`)
+                   .setColor(CONFIG.COLORS.HIGH);
 
-    // Update overview message
-    async updateOverviewMessage(client) {
-        const overviewChannel = client.channels.cache.get(CONFIG.INCIDENT_CHANNEL_ID);
-        if (!overviewChannel) return;
+               const confirmRow = new ActionRowBuilder()
+                   .addComponents(
+                       new ButtonBuilder()
+                           .setCustomId(`incident_delete_confirm_${incidentId}`)
+                           .setLabel('Yes, Delete')
+                           .setStyle(ButtonStyle.Danger)
+                           .setEmoji('🗑️'),
+                       new ButtonBuilder()
+                           .setCustomId('incident_delete_cancel')
+                           .setLabel('Cancel')
+                           .setStyle(ButtonStyle.Secondary)
+                           .setEmoji('❌')
+                   );
 
-        const embed = EmbedManager.createOverviewEmbed();
-        
-        if (overviewMessageId) {
-            try {
-                const message = await overviewChannel.messages.fetch(overviewMessageId);
-                await message.edit({ embeds: [embed] });
-            } catch (error) {
-                // Message might not exist, create a new one
-                const newMessage = await overviewChannel.send({ embeds: [embed] });
-                overviewMessageId = newMessage.id;
-            }
-        } else {
-            const newMessage = await overviewChannel.send({ embeds: [embed] });
-            overviewMessageId = newMessage.id;
-        }
-    }
+               await interaction.reply({
+                   embeds: [confirmEmbed],
+                   components: [confirmRow],
+                   ephemeral: true
+               });
+           } else if (customId.startsWith('incident_delete_confirm_')) {
+               const incidentId = customId.replace('incident_delete_confirm_', '');
+               const deleted = IncidentUtils.deleteIncident(incidentId, interaction.user.id);
+               
+               if (deleted) {
+                   await interaction.update({
+                       content: `✅ Incident **${incidentId}** has been deleted successfully.`,
+                       embeds: [],
+                       components: []
+                   });
+                   
+                   await this.updateOverviewMessage(client);
+                   await this.sendAuditLog(client, 'DELETE', { id: incidentId, title: 'Deleted Incident' }, interaction.user.id, 'Incident deleted');
+               } else {
+                   await interaction.update({
+                       content: '❌ Failed to delete incident. It may not exist.',
+                       embeds: [],
+                       components: []
+                   });
+               }
+           } else if (customId === 'incident_delete_cancel') {
+               await interaction.update({
+                   content: '✅ Deletion cancelled.',
+                   embeds: [],
+                   components: []
+               });
+           }
+
+       } catch (error) {
+           console.error('Error handling button interaction:', error);
+           if (!interaction.replied && !interaction.deferred) {
+               await interaction.reply({ content: 'An error occurred while processing your request.', ephemeral: true });
+           }
+       }
+   },
+
+   // Modal submission handler
+   async handleModalSubmit(interaction, client) {
+       if (!interaction.isModalSubmit()) return;
+       if (interaction.user.id !== CONFIG.AUTHORIZED_USER_ID) {
+           return interaction.reply({ content: 'You are not authorized to use this panel.', ephemeral: true });
+       }
+
+       const customId = interaction.customId;
+
+       try {
+           if (customId === 'incident_create_modal') {
+               const title = interaction.fields.getTextInputValue('incident_title');
+               const description = interaction.fields.getTextInputValue('incident_description');
+               const priority = interaction.fields.getTextInputValue('incident_priority') || CONFIG.PRIORITY.MEDIUM;
+               const assignee = interaction.fields.getTextInputValue('incident_assignee') || 'Unassigned';
+
+               const validPriorities = Object.values(CONFIG.PRIORITY);
+               const finalPriority = validPriorities.includes(priority) ? priority : CONFIG.PRIORITY.MEDIUM;
+
+               const incident = IncidentUtils.createIncident({
+                   title,
+                   description,
+                   priority: finalPriority,
+                   assignedTo: assignee,
+                   createdBy: interaction.user.id
+               });
+
+               const embed = EmbedManager.createIncidentDetailEmbed(incident);
+               const components = ComponentManager.createIncidentDetailComponents(incident.id);
+
+               await interaction.reply({
+                   content: `✅ Incident **${incident.id}** created successfully!`,
+                   embeds: [embed],
+                   components: components,
+                   ephemeral: true
+               });
+
+               await this.updateOverviewMessage(client);
+               await this.sendAuditLog(client, 'CREATE', incident, interaction.user.id, 'New incident created');
+
+           } else if (customId.startsWith('incident_edit_modal_')) {
+               const incidentId = customId.replace('incident_edit_modal_', '');
+               const title = interaction.fields.getTextInputValue('incident_title');
+               const description = interaction.fields.getTextInputValue('incident_description');
+               const priority = interaction.fields.getTextInputValue('incident_priority');
+               const status = interaction.fields.getTextInputValue('incident_status');
+               const assignee = interaction.fields.getTextInputValue('incident_assignee');
+
+               const validPriorities = Object.values(CONFIG.PRIORITY);
+               const validStatuses = Object.values(CONFIG.STATUS);
+               
+               const updates = {
+                   title,
+                   description,
+                   priority: validPriorities.includes(priority) ? priority : CONFIG.PRIORITY.MEDIUM,
+                   status: validStatuses.includes(status) ? status : CONFIG.STATUS.OPEN,
+                   assignedTo: assignee || 'Unassigned'
+               };
+
+               const incident = IncidentUtils.updateIncident(incidentId, updates, interaction.user.id);
+
+               if (incident) {
+                   const embed = EmbedManager.createIncidentDetailEmbed(incident);
+                   const components = ComponentManager.createIncidentDetailComponents(incident.id);
+
+                   await interaction.reply({
+                       content: `✅ Incident **${incidentId}** updated successfully!`,
+                       embeds: [embed],
+                       components: components,
+                       ephemeral: true
+                   });
+
+                   await this.updateOverviewMessage(client);
+                   await this.sendAuditLog(client, 'UPDATE', incident, interaction.user.id, 'Incident details updated');
+               } else {
+                   await interaction.reply({ content: '❌ Failed to update incident. It may not exist.', ephemeral: true });
+               }
+
+           } else if (customId.startsWith('incident_note_modal_')) {
+               const incidentId = customId.replace('incident_note_modal_', '');
+               const noteContent = interaction.fields.getTextInputValue('note_content');
+               
+               const incident = incidents.get(incidentId);
+               if (!incident) {
+                   return interaction.reply({ content: '❌ Incident not found!', ephemeral: true });
+               }
+
+               const note = {
+                   id: Date.now(),
+                   content: noteContent,
+                   author: interaction.user.username,
+                   timestamp: new Date()
+               };
+
+               incident.notes.push(note);
+               incident.history.push({
+                   action: 'Note Added',
+                   user: interaction.user.id,
+                   timestamp: new Date(),
+                   details: `Added note: ${noteContent.substring(0, 100)}${noteContent.length > 100 ? '...' : ''}`
+               });
+
+               const embed = EmbedManager.createIncidentDetailEmbed(incident);
+               const components = ComponentManager.createIncidentDetailComponents(incident.id);
+
+               await interaction.reply({
+                   content: `✅ Note added to incident **${incidentId}**!`,
+                   embeds: [embed],
+                   components: components,
+                   ephemeral: true
+               });
+
+               await this.sendAuditLog(client, 'NOTE', incident, interaction.user.id, 'Note added to incident');
+
+           } else if (customId.startsWith('incident_resolve_modal_')) {
+               const incidentId = customId.replace('incident_resolve_modal_', '');
+               const resolveComment = interaction.fields.getTextInputValue('resolve_comment');
+               
+               const updates = { status: CONFIG.STATUS.RESOLVED };
+               const incident = IncidentUtils.updateIncident(incidentId, updates, interaction.user.id);
+
+               if (incident) {
+                   if (resolveComment) {
+                       const note = {
+                           id: Date.now(),
+                           content: `**Resolution:** ${resolveComment}`,
+                           author: interaction.user.username,
+                           timestamp: new Date()
+                       };
+                       incident.notes.push(note);
+                   }
+
+                   const embed = EmbedManager.createIncidentDetailEmbed(incident);
+                   const components = ComponentManager.createIncidentDetailComponents(incident.id);
+
+                   await interaction.reply({
+                       content: `✅ Incident **${incidentId}** has been resolved!`,
+                       embeds: [embed],
+                       components: components,
+                       ephemeral: true
+                   });
+
+                   await this.updateOverviewMessage(client);
+                   await this.sendAuditLog(client, 'RESOLVE', incident, interaction.user.id, 'Incident marked as resolved');
+               } else {
+                   await interaction.reply({ content: '❌ Failed to resolve incident. It may not exist.', ephemeral: true });
+               }
+
+           } else if (customId === 'incident_search_modal') {
+               const searchQuery = interaction.fields.getTextInputValue('search_query');
+               const searchResults = IncidentUtils.getIncidents({ search: searchQuery });
+
+               const embed = EmbedManager.createIncidentListEmbed(searchResults, 1, { search: searchQuery });
+               const components = ComponentManager.createIncidentListComponents(searchResults, 1, Math.ceil(searchResults.length / 5), { search: searchQuery });
+
+               await interaction.reply({
+                   embeds: [embed],
+                   components: components,
+                   ephemeral: true
+               });
+           }
+
+       } catch (error) {
+           console.error('Error handling modal submit:', error);
+           if (!interaction.replied && !interaction.deferred) {
+               await interaction.reply({ content: 'An error occurred while processing your submission.', ephemeral: true });
+           }
+       }
+   },
+
+   // Update overview message
+   async updateOverviewMessage(client) {
+       try {
+           const channel = client.channels.cache.get(CONFIG.INCIDENT_CHANNEL_ID);
+           if (!channel) return;
+
+           const embed = EmbedManager.createOverviewEmbed();
+
+           if (overviewMessageId) {
+               try {
+                   const message = await channel.messages.fetch(overviewMessageId);
+                   await message.edit({ embeds: [embed] });
+               } catch (error) {
+                   // Message might not exist, create new one
+                   const newMessage = await channel.send({ embeds: [embed] });
+                   overviewMessageId = newMessage.id;
+               }
+           } else {
+               const newMessage = await channel.send({ embeds: [embed] });
+               overviewMessageId = newMessage.id;
+           }
+       } catch (error) {
+           console.error('Error updating overview message:', error);
+       }
+   },
+
+   // Send audit log
+   async sendAuditLog(client, action, incident, userId, details) {
+       try {
+           const auditChannel = client.channels.cache.get(CONFIG.AUDIT_CHANNEL_ID);
+           if (!auditChannel) return;
+
+           const embed = EmbedManager.createAuditEmbed(incident, action, userId, details);
+           await auditChannel.send({ embeds: [embed] });
+       } catch (error) {
+           console.error('Error sending audit log:', error);
+       }
+   },
+
+   // Export utilities for external use
+   IncidentUtils,
+   EmbedManager,
+   ComponentManager,
+   ModalManager,
+   CONFIG
 };
