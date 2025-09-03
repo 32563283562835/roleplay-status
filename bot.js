@@ -82,7 +82,7 @@ async function updateStatus() {
             { name: "Last Seen Offline", value: lastSeenOffline ? formatDiscordTimestamp(lastSeenOffline) : "❓ Unknown", inline: true },
             { name: "Offline Duration", value: lastSeenOffline && lastSeenOnline ? getDuration(lastSeenOffline, lastSeenOnline) : "❓ Unknown", inline: true },
             { name: "Last Update", value: formatDiscordTimestamp(new Date()), inline: false },
-            { name: "Status Bot", value: "[View Status Here](https://stats.uptimerobot.com/FwTtNkwNTw)", inline: false }
+            { name: "Status Bot", value: "[View Status Here](https://stats.uptimerobot.com/FwTtNkwNTw/801177003)", inline: false }
         )
         .setFooter({ text: "Updating every minute..." })
         .setColor(0x0080FF);
@@ -121,3 +121,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
