@@ -23,7 +23,6 @@ const client = new Client({
 client.once('ready', () => {
     console.log(`✅ Bot is online as ${client.user.tag}!`);
     });
-});
 
 let lastSeenOnline = null;
 let lastSeenOffline = null;
@@ -130,3 +129,4 @@ function getDuration(from, to) {
 }
 
 client.login(process.env.BOT_TOKEN);
+
