@@ -19,24 +19,17 @@ const client = new Client({
     ]
 });
 
-// Bot ready event
-client.once('ready', () => {
-    console.log(`✅ Bot is online as ${client.user.tag}!`);
-    });
-
 let lastSeenOnline = null;
 let lastSeenOffline = null;
 
 client.once('ready', async () => {
     console.log(`✅ Status bot logged in as ${client.user.tag}`);
 
-    // Eerste set
-    await updatePresence();
+    // Initial status update
     await updateStatus();
 
-    // Embed elke minuut verversen
+    // Update status every minute
     setInterval(async () => {
-        await updatePresence();
         await updateStatus();
     }, 60 * 1000);
 });
@@ -81,7 +74,6 @@ async function updateStatus() {
         }
     }
 
-
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
         .addFields(
@@ -93,7 +85,7 @@ async function updateStatus() {
             { name: "Status Bot", value: "[View Status Here](https://stats.uptimerobot.com/FwTtNkwNTw)", inline: false }
         )
         .setFooter({ text: "Updating every minute..." })
-        .setColor('0080fFF');
+        .setColor(0x0080FF);
 
     const channel = client.channels.cache.get(statusChannelId);
     if (channel) {
@@ -124,9 +116,8 @@ function formatUptime(ms) {
 // Duration between two dates
 function getDuration(from, to) {
     const ms = to - from;
-    if (ms < 0) return ":x: Currently Offline...";
+    if (ms < 0) return "❓ Unknown";
     return formatUptime(ms);
 }
 
 client.login(process.env.BOT_TOKEN);
-
