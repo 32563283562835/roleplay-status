@@ -19,75 +19,10 @@ const client = new Client({
     ]
 });
 
-
-// Initialize commands collection
-client.commands = new Collection();
-
-// Load the incident panel module
-const incidentPanel = require('./IncidentPanel.js');
-
-// Store the incident panel in commands collection
-client.commands.set(incidentPanel.name, incidentPanel);
-
 // Bot ready event
 client.once('ready', () => {
     console.log(`✅ Bot is online as ${client.user.tag}!`);
-    
-    // Setup incident panel
-    incidentPanel.setupIncidentPanel(client, {
-        AUTHORIZED_USER_ID: '1329813179865235467',    // Vervang met jouw Discord User ID
-        INCIDENT_CHANNEL_ID: '1406381100980371557',   // Vervang met het incident kanaal ID
-        AUDIT_CHANNEL_ID: '1407310001718038609'       // Vervang met het audit kanaal ID
     });
-});
-
-// Message event for commands
-client.on('messageCreate', async (message) => {
-    // Ignore bot messages
-    if (message.author.bot) return;
-    
-    // Check if message starts with prefix
-    const prefix = '!';
-    if (!message.content.startsWith(prefix)) return;
-    
-    // Parse command and arguments
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-    
-    // Get command from collection
-    const command = client.commands.get(commandName);
-    
-    if (!command) return;
-    
-    try {
-        // Execute the command
-        await command.execute(message, args, client);
-    } catch (error) {
-        console.error(`Error executing command ${commandName}:`, error);
-        message.reply('There was an error executing that command!').catch(console.error);
-    }
-});
-
-// Handle button and modal interactions for incident panel
-client.on('interactionCreate', async (interaction) => {
-    try {
-        if (interaction.isButton() || interaction.isStringSelectMenu()) {
-            // Handle button interactions
-            await incidentPanel.handleButtonInteraction(interaction, client);
-        } else if (interaction.isModalSubmit()) {
-            // Handle modal interactions
-            await incidentPanel.handleModalInteraction(interaction, client);
-        }
-    } catch (error) {
-        console.error('Error handling interaction:', error);
-        
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({
-                content: 'An error occurred while processing your request.',
-                ephemeral: true
-            }).catch(console.error);
-        }
-    }
 });
 
 let lastSeenOnline = null;
@@ -106,21 +41,6 @@ client.once('ready', async () => {
         await updateStatus();
     }, 60 * 1000);
 });
-
-async function updatePresence() {
-    try {
-        const incidentCount = getIncidentCount();
-        client.user.setPresence({
-            status: incidentCount > 0 ? 'dnd' : 'online',
-            activities: [{
-                name: incidentCount > 0 ? `${incidentCount} incidents` : "Monitoring",
-                type: 3
-            }]
-        });
-    } catch (err) {
-        console.error("❌ Failed to set presence:", err);
-    }
-}
 
 async function updateStatus() {
     let mainBotStatus = "❓ Unknown";
@@ -162,13 +82,11 @@ async function updateStatus() {
         }
     }
 
-    const incidentCount = getIncidentCount();
 
     const embed = new EmbedBuilder()
         .setTitle("📊 Bot Status Overview")
         .addFields(
             { name: "Roleplay Bot", value: mainBotStatus, inline: true },
-            { name: "Active Incidents", value: `${incidentCount}`, inline: false },
             { name: "Last Seen Online", value: lastSeenOnline ? formatDiscordTimestamp(lastSeenOnline) : "❓ Unknown", inline: true },
             { name: "Last Seen Offline", value: lastSeenOffline ? formatDiscordTimestamp(lastSeenOffline) : "❓ Unknown", inline: true },
             { name: "Offline Duration", value: lastSeenOffline && lastSeenOnline ? getDuration(lastSeenOffline, lastSeenOnline) : "❓ Unknown", inline: true },
@@ -176,7 +94,7 @@ async function updateStatus() {
             { name: "Status Bot", value: "[View Status Here](https://stats.uptimerobot.com/FwTtNkwNTw)", inline: false }
         )
         .setFooter({ text: "Updating every minute..." })
-        .setColor(incidentCount > 0 ? 0xED4245 : 0x0080FF);
+        .setColor('0080fFF');
 
     const channel = client.channels.cache.get(statusChannelId);
     if (channel) {
@@ -211,19 +129,4 @@ function getDuration(from, to) {
     return formatUptime(ms);
 }
 
-// Temporary dummy until incident-panel storage is linked
-function getIncidentCount() {
-    return 0;
-}
-
 client.login(process.env.BOT_TOKEN);
-
-
-
-
-
-
-
-
-
-
